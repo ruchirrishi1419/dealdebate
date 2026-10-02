@@ -1,0 +1,8 @@
+{
+  "name": "DealDebate",
+  "description": "An AI negotiation practice partner for business students to simulate tough high-stakes commercial deals, handle objections, and get executive performance report cards.",
+  "requestFramePermissions": [],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}
