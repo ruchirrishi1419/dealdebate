@@ -2,7 +2,8 @@ import React, { useState } from 'react';
 import { HomeScreen } from './components/HomeScreen';
 import { ChatScreen } from './components/ChatScreen';
 import { ReportCardScreen } from './components/ReportCardScreen';
-import { OpponentProfile, ChatMessage, ReportCard, ScenarioCategory, DifficultyLevel } from './types';
+import { HistorySidebar } from './components/HistorySidebar';
+import { OpponentProfile, ChatMessage, ReportCard, ScenarioCategory, DifficultyLevel, SavedSessionRecord } from './types';
 import { AlertCircle, X } from 'lucide-react';
 
 export default function App() {
@@ -17,6 +18,18 @@ export default function App() {
   const [isEvaluating, setIsEvaluating] = useState(false);
   const [reportCard, setReportCard] = useState<ReportCard | null>(null);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
+
+  // Session history records (persisted across page reloads in current browser session)
+  const [savedRecords, setSavedRecords] = useState<SavedSessionRecord[]>(() => {
+    try {
+      const raw = sessionStorage.getItem('dealdebate_session_records');
+      if (raw) return JSON.parse(raw);
+    } catch (e) {
+      console.error('Failed to load session history from storage', e);
+    }
+    return [];
+  });
+  const [isHistoryOpen, setIsHistoryOpen] = useState(false);
 
   const formatTimestamp = () => {
     const d = new Date();
@@ -129,6 +142,34 @@ export default function App() {
 
       const report: ReportCard = await res.json();
       setReportCard(report);
+
+      // Archive record into session history
+      const newRecord: SavedSessionRecord = {
+        id: `session-${Date.now()}`,
+        scenario: activeScenario,
+        category,
+        opponent: activeOpponent,
+        messages: allMessages,
+        reportCard: report,
+        completedAt: new Date().toLocaleDateString([], { 
+          month: 'short', 
+          day: 'numeric', 
+          hour: '2-digit', 
+          minute: '2-digit' 
+        }),
+        roundsCompleted: allMessages.filter((m) => m.role === 'user').length
+      };
+
+      setSavedRecords((prev) => {
+        const updated = [newRecord, ...prev];
+        try {
+          sessionStorage.setItem('dealdebate_session_records', JSON.stringify(updated));
+        } catch (e) {
+          console.error('Failed to save to sessionStorage', e);
+        }
+        return updated;
+      });
+
       // Automatically transition to report card
       setScreen('report');
     } catch (err: unknown) {
@@ -235,6 +276,28 @@ export default function App() {
     }
   };
 
+  // View a record selected from the history drawer
+  const handleSelectRecord = (record: SavedSessionRecord) => {
+    setScenario(record.scenario);
+    setCategory(record.category);
+    setOpponent(record.opponent);
+    setMessages(record.messages);
+    setReportCard(record.reportCard);
+    setCurrentRound(record.roundsCompleted + 1);
+    setScreen('report');
+    setIsHistoryOpen(false);
+  };
+
+  // Clear all archived records
+  const handleClearHistory = () => {
+    setSavedRecords([]);
+    try {
+      sessionStorage.removeItem('dealdebate_session_records');
+    } catch (e) {
+      console.error('Failed to clear sessionStorage', e);
+    }
+  };
+
   return (
     <div className="min-h-screen bg-white font-sans text-[#111111]">
       {/* Global Error Banner */}
@@ -258,6 +321,8 @@ export default function App() {
         <HomeScreen
           onStart={handleStartNegotiation}
           isLoading={isInitializing}
+          onOpenHistory={() => setIsHistoryOpen(true)}
+          historyCount={savedRecords.length}
         />
       )}
 
@@ -273,6 +338,8 @@ export default function App() {
           onSendMessage={handleSendMessage}
           onQuitToHome={() => setScreen('home')}
           onForceEvaluate={messages.length >= 4 ? handleForceEvaluate : undefined}
+          onOpenHistory={() => setIsHistoryOpen(true)}
+          historyCount={savedRecords.length}
         />
       )}
 
@@ -289,8 +356,19 @@ export default function App() {
             setOpponent(null);
             setScreen('home');
           }}
+          onOpenHistory={() => setIsHistoryOpen(true)}
+          historyCount={savedRecords.length}
         />
       )}
+
+      {/* Session History Sidebar Drawer */}
+      <HistorySidebar
+        isOpen={isHistoryOpen}
+        onClose={() => setIsHistoryOpen(false)}
+        history={savedRecords}
+        onSelectRecord={handleSelectRecord}
+        onClearHistory={handleClearHistory}
+      />
     </div>
   );
 }

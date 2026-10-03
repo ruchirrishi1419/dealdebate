@@ -11,7 +11,8 @@ import {
   Loader2,
   Lightbulb,
   ChevronDown,
-  ChevronUp
+  ChevronUp,
+  History
 } from 'lucide-react';
 
 interface ChatScreenProps {
@@ -25,6 +26,8 @@ interface ChatScreenProps {
   onSendMessage: (text: string) => Promise<void>;
   onQuitToHome: () => void;
   onForceEvaluate?: () => void;
+  onOpenHistory?: () => void;
+  historyCount?: number;
 }
 
 export const ChatScreen: React.FC<ChatScreenProps> = ({
@@ -38,6 +41,8 @@ export const ChatScreen: React.FC<ChatScreenProps> = ({
   onSendMessage,
   onQuitToHome,
   onForceEvaluate,
+  onOpenHistory,
+  historyCount = 0,
 }) => {
   const [inputText, setInputText] = useState('');
   const [collapsedHints, setCollapsedHints] = useState<Record<string, boolean>>({});
@@ -142,8 +147,24 @@ export const ChatScreen: React.FC<ChatScreenProps> = ({
             </div>
           </div>
 
-          {/* Right: Round Counter & Status */}
-          <div className="flex items-center gap-4 shrink-0">
+          {/* Right: Round Counter, History & Status */}
+          <div className="flex items-center gap-3.5 shrink-0">
+            {onOpenHistory && (
+              <button
+                onClick={onOpenHistory}
+                className="inline-flex items-center gap-1.5 px-2.5 py-1.5 border border-[#111111] hover:bg-neutral-50 bg-white text-[#111111] text-[11px] uppercase tracking-wider font-medium font-sans transition-colors active:scale-[0.99]"
+                title="View previous session transcripts & report cards"
+              >
+                <History className="w-3.5 h-3.5 text-neutral-600" />
+                <span className="hidden sm:inline">History</span>
+                {historyCount > 0 && (
+                  <span className="font-mono text-[10px] bg-[#111111] text-white px-1.5 py-0.5 leading-none">
+                    {historyCount}
+                  </span>
+                )}
+              </button>
+            )}
+
             <div className="text-right font-sans">
               <div className="text-[10px] uppercase tracking-widest text-neutral-400 font-medium">
                 Round

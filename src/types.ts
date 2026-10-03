@@ -76,3 +76,14 @@ export interface SessionConfig {
   category: ScenarioCategory;
   difficulty: DifficultyLevel;
 }
+
+export interface SavedSessionRecord {
+  id: string;
+  scenario: string;
+  category: ScenarioCategory;
+  opponent: OpponentProfile;
+  messages: ChatMessage[];
+  reportCard: ReportCard;
+  completedAt: string;
+  roundsCompleted: number;
+}

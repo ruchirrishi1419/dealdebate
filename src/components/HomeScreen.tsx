@@ -15,7 +15,9 @@ import {
   Zap,
   Flame,
   Check,
-  Info
+  Info,
+  History,
+  ChevronDown
 } from 'lucide-react';
 
 interface HomeScreenProps {
@@ -28,9 +30,16 @@ interface HomeScreenProps {
     difficulty?: DifficultyLevel
   ) => Promise<void>;
   isLoading: boolean;
+  onOpenHistory?: () => void;
+  historyCount?: number;
 }
 
-export const HomeScreen: React.FC<HomeScreenProps> = ({ onStart, isLoading }) => {
+export const HomeScreen: React.FC<HomeScreenProps> = ({ 
+  onStart, 
+  isLoading,
+  onOpenHistory,
+  historyCount = 0
+}) => {
   // Quick setup modal state
   const [activePreset, setActivePreset] = useState<ScenarioPreset | null>(null);
   const [setupScenario, setSetupScenario] = useState('');
@@ -133,7 +142,24 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({ onStart, isLoading }) =>
             </span>
           </div>
 
-          <div className="flex items-center gap-4 text-xs font-sans">
+          <div className="flex items-center gap-3 text-xs font-sans">
+            {onOpenHistory && (
+              <button
+                type="button"
+                onClick={onOpenHistory}
+                className="inline-flex items-center gap-1.5 px-3 py-1.5 border border-[#111111] bg-white text-[#111111] hover:bg-neutral-50 text-[11px] uppercase tracking-wider font-medium font-sans transition-colors active:scale-[0.99]"
+                title="View previous negotiation transcripts and report cards"
+              >
+                <History className="w-3.5 h-3.5 text-neutral-600" />
+                <span>History</span>
+                {historyCount > 0 && (
+                  <span className="font-mono text-[10px] bg-[#111111] text-white px-1.5 py-0.5 leading-none">
+                    {historyCount}
+                  </span>
+                )}
+              </button>
+            )}
+
             <span className="hidden md:inline text-neutral-500 tracking-wide">
               Practice Mode · Medium · Interview Prep
             </span>
@@ -169,9 +195,30 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({ onStart, isLoading }) =>
               <span className="w-1.5 h-1.5 bg-[#111111]" />
               <span>Custom Simulation Workspace</span>
             </h2>
-            <div className="flex items-center gap-1.5 text-xs">
-              <span className="text-neutral-500 mr-1 text-[11px] uppercase tracking-wider">Format:</span>
-              <div className="inline-flex border border-[#e5e5e5] p-0.5 bg-neutral-50">
+            <div className="flex items-center gap-2 text-xs w-full sm:w-auto">
+              <span className="text-neutral-500 text-[11px] uppercase tracking-wider shrink-0">Format:</span>
+
+              {/* Mobile Single Dropdown Select: matches premium black-and-white theme */}
+              <div className="relative flex-1 sm:hidden">
+                <select
+                  value={customCategory}
+                  onChange={(e) => setCustomCategory(e.target.value as ScenarioCategory)}
+                  aria-label="Select simulation format"
+                  className="w-full bg-white text-[#111111] border border-[#111111] rounded-none px-3 py-1.5 pr-8 text-xs font-sans uppercase tracking-wider font-medium appearance-none focus:outline-none focus:border-[#111111] cursor-pointer"
+                >
+                  <option value="NEGOTIATION">Negotiation</option>
+                  <option value="GROUP_DISCUSSION">Group Discussion</option>
+                  <option value="INTERVIEW">Interview</option>
+                  <option value="PITCHING">Pitching</option>
+                  <option value="EVERYDAY_SKILLS">Everyday Skills</option>
+                </select>
+                <div className="pointer-events-none absolute inset-y-0 right-0 flex items-center px-2.5 text-[#111111]">
+                  <ChevronDown className="w-3.5 h-3.5" />
+                </div>
+              </div>
+
+              {/* Desktop Tab Layout: unchanged */}
+              <div className="hidden sm:inline-flex border border-[#e5e5e5] p-0.5 bg-neutral-50">
                 {(['NEGOTIATION', 'GROUP_DISCUSSION', 'INTERVIEW', 'PITCHING', 'EVERYDAY_SKILLS'] as ScenarioCategory[]).map((cat) => (
                   <button
                     key={cat}
@@ -206,7 +253,7 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({ onStart, isLoading }) =>
 
             {/* Difficulty selector on custom box */}
             <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pt-2 border-t border-[#f0f0f0]">
-              <div className="flex items-center gap-2 text-xs">
+              <div className="flex flex-wrap items-center gap-2 text-xs">
                 <span className="text-neutral-500 text-[11px] uppercase tracking-wider font-medium">Difficulty:</span>
                 <div className="inline-flex border border-[#e5e5e5] p-0.5 bg-white">
                   <button

@@ -14,7 +14,8 @@ import {
   ChevronUp, 
   FileText,
   AlertTriangle,
-  Lightbulb
+  Lightbulb,
+  History
 } from 'lucide-react';
 
 interface ReportCardScreenProps {
@@ -24,6 +25,8 @@ interface ReportCardScreenProps {
   messages: ChatMessage[];
   onRestartSame: () => void;
   onNewScenario: () => void;
+  onOpenHistory?: () => void;
+  historyCount?: number;
 }
 
 export const ReportCardScreen: React.FC<ReportCardScreenProps> = ({
@@ -33,6 +36,8 @@ export const ReportCardScreen: React.FC<ReportCardScreenProps> = ({
   messages,
   onRestartSame,
   onNewScenario,
+  onOpenHistory,
+  historyCount = 0,
 }) => {
   const [copied, setCopied] = useState(false);
   const [showTranscript, setShowTranscript] = useState(false);
@@ -147,6 +152,22 @@ ${report.topTip}
           </button>
 
           <div className="flex items-center gap-2.5">
+            {onOpenHistory && (
+              <button
+                onClick={onOpenHistory}
+                className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-none border border-[#111111] bg-white text-[#111111] hover:bg-neutral-50 text-xs uppercase tracking-wider font-medium transition-colors active:scale-[0.99]"
+                title="View previous session transcripts & report cards"
+              >
+                <History className="w-3.5 h-3.5 text-neutral-600" />
+                <span>History</span>
+                {historyCount > 0 && (
+                  <span className="font-mono text-[10px] bg-[#111111] text-white px-1.5 py-0.5 leading-none">
+                    {historyCount}
+                  </span>
+                )}
+              </button>
+            )}
+
             <button
               onClick={copyToClipboard}
               className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-none border border-[#111111] bg-white text-[#111111] hover:bg-neutral-50 text-xs uppercase tracking-wider font-medium transition-colors active:scale-[0.99]"
