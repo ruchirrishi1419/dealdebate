@@ -63,6 +63,7 @@ export default function App() {
       }
 
       const oppProfile: OpponentProfile = data.opponent;
+      oppProfile.name = 'DealDebate';
       if (userRole) oppProfile.userRole = userRole;
       if (dealSize) oppProfile.stakes = dealSize;
       oppProfile.difficulty = difficulty;
@@ -235,16 +236,16 @@ export default function App() {
   };
 
   return (
-    <div className="min-h-screen bg-[#0b0f17] font-sans text-slate-200">
+    <div className="min-h-screen bg-white font-sans text-[#111111]">
       {/* Global Error Banner */}
       {errorMessage && (
-        <div className="bg-red-950/80 border-b border-red-800/80 px-4 py-2.5 text-xs text-red-200 flex items-center justify-between sticky top-0 z-50">
+        <div className="bg-neutral-100 border-b border-[#111111] px-4 py-2.5 text-xs text-[#111111] flex items-center justify-between sticky top-0 z-50">
           <div className="flex items-center gap-2 max-w-4xl mx-auto w-full">
-            <AlertCircle className="w-4 h-4 text-red-400 shrink-0" />
+            <AlertCircle className="w-4 h-4 text-[#111111] shrink-0" />
             <span className="flex-1">{errorMessage}</span>
             <button
               onClick={() => setErrorMessage(null)}
-              className="p-1 hover:bg-red-900/60 rounded text-red-400 hover:text-red-200"
+              className="p-1 hover:bg-neutral-200 rounded-none text-[#111111] transition-colors"
             >
               <X className="w-3.5 h-3.5" />
             </button>

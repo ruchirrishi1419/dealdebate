@@ -149,35 +149,29 @@ function generateFallbackPersona(
 
   // --- EASY MODE: Friendly, simple, encouraging, with hints ---
   if (difficulty === 'EASY') {
-    let opponentName = 'Alex Morgan';
     let opponentTitle = 'Collaborative Project Lead';
     let opponentTypeLabel = 'Friendly Counterpart';
 
     if (cat === 'GROUP_DISCUSSION') {
-      opponentName = 'Priya Sharma';
       opponentTitle = 'Discussion Panelist';
       opponentTypeLabel = 'Friendly Debater';
     } else if (cat === 'INTERVIEW') {
-      opponentName = 'Sarah Lin';
       opponentTitle = 'Supportive Hiring Manager';
       opponentTypeLabel = 'Encouraging Interviewer';
     } else if (cat === 'PITCHING') {
-      opponentName = 'Mark Davies';
       opponentTitle = 'Angel Mentor & Investor';
       opponentTypeLabel = 'Helpful Investor';
     } else if (cat === 'EVERYDAY_SKILLS') {
-      opponentName = 'Tom Miller';
       opponentTitle = 'Property Manager';
       opponentTypeLabel = 'Reasonable Landlord';
     } else {
-      opponentName = 'David Chen';
       opponentTitle = 'Department Director';
       opponentTypeLabel = 'Cooperative Buyer';
     }
 
     return {
       opponent: {
-        name: opponentName,
+        name: 'DealDebate',
         title: role || opponentTitle,
         company: 'Partnership Group',
         stance: 'Open-minded, friendly, and willing to agree once simple logical points are explained.',
@@ -196,7 +190,7 @@ function generateFallbackPersona(
     if (sLower.includes('crypto')) {
       return {
         opponent: {
-          name: 'Aditya Sengupta',
+          name: 'DealDebate',
           title: 'Senior Policy Debater & Monetary Analyst',
           company: 'National Economic Forum GD Panel',
           stance: 'Strongly argues for sovereign capital controls, warning of systemic financial contagion and unregulated retail speculation.',
@@ -212,7 +206,7 @@ function generateFallbackPersona(
     if (sLower.includes('wfh') || sLower.includes('work from home') || sLower.includes('office')) {
       return {
         opponent: {
-          name: 'Ritu Malhotra',
+          name: 'DealDebate',
           title: 'People Strategy Debater & Operations Lead',
           company: 'B-School Executive Round Table',
           stance: 'Defends in-person office collaboration, arguing remote work degrades organizational culture, mentoring, and serendipitous innovation.',
@@ -228,7 +222,7 @@ function generateFallbackPersona(
     if (sLower.includes('job') || sLower.includes('ai')) {
       return {
         opponent: {
-          name: 'Dr. Vikram Joshi',
+          name: 'DealDebate',
           title: 'Labor Economics Debater & Tech Critic',
           company: 'Global Policy Debate Series',
           stance: 'Argues AI automates cognitive labor exponentially faster than human retraining can absorb displaced workers.',
@@ -243,7 +237,7 @@ function generateFallbackPersona(
 
     return {
       opponent: {
-        name: 'Arjun Rao',
+        name: 'DealDebate',
         title: 'Lead Debater & Panelist',
         company: 'Premier B-School GD Caucus',
         stance: 'Rigorous counter-debater who actively probes weak assumptions, statistical blindspots, and systemic unintended consequences.',
@@ -261,7 +255,7 @@ function generateFallbackPersona(
     if (sLower.includes('tell me about yourself')) {
       return {
         opponent: {
-          name: 'Maya Sundaram',
+          name: 'DealDebate',
           title: 'Executive Hiring Director',
           company: 'Vertex Global Leadership',
           stance: 'Probes for concise executive presence, distinct competitive positioning, and self-awareness without rehearsed monologues.',
@@ -277,7 +271,7 @@ function generateFallbackPersona(
     if (sLower.includes('weakness')) {
       return {
         opponent: {
-          name: 'Sarah Jenkins',
+          name: 'DealDebate',
           title: 'VP of Talent & People',
           company: 'Apex Horizon Capital',
           stance: 'Cuts through cliché answers like "perfectionist" to evaluate genuine vulnerability, operational self-awareness, and mitigation systems.',
@@ -293,7 +287,7 @@ function generateFallbackPersona(
     // Defend best candidate
     return {
       opponent: {
-        name: 'David Reynolds',
+        name: 'DealDebate',
         title: 'Managing Director & Panel Lead',
         company: 'Meridian Capital Partners',
         stance: 'Exacting executive interviewer who cuts through buzzwords, drills into failure management, and probes behavioral resilience.',
@@ -311,7 +305,7 @@ function generateFallbackPersona(
     if (sLower.includes('2 minute') || sLower.includes('startup')) {
       return {
         opponent: {
-          name: 'Alexandre Vance',
+          name: 'DealDebate',
           title: 'Founding Partner',
           company: 'Nexus Seed Capital',
           stance: 'Impatient, high-velocity investor looking for immediate clarity on market problem severity, distribution edge, and monetization velocity.',
@@ -326,7 +320,7 @@ function generateFallbackPersona(
 
     return {
       opponent: {
-        name: 'Kabir Singhania',
+        name: 'DealDebate',
         title: 'General Partner',
         company: 'Apex Horizon Ventures',
         stance: 'Skeptical early-stage investor who aggressively tests unit economics, customer acquisition friction, and defensibility against incumbents.',
@@ -344,7 +338,7 @@ function generateFallbackPersona(
     if (sLower.includes('landlord') || sLower.includes('fix') || sLower.includes('apartment') || sLower.includes('rent')) {
       return {
         opponent: {
-          name: 'Arthur Pendelton',
+          name: 'DealDebate',
           title: 'Property Owner & Landlord',
           company: 'Highland Residential Management',
           stance: 'Reluctant, budget-averse landlord who deflects maintenance requests, delays repairs, and questions the severity of the issue.',
@@ -360,7 +354,7 @@ function generateFallbackPersona(
     if (sLower.includes('boss') || sLower.includes('disagree') || sLower.includes('politely')) {
       return {
         opponent: {
-          name: 'Marcus Sterling',
+          name: 'DealDebate',
           title: 'Vice President & Direct Manager',
           company: 'Enterprise Strategy Group',
           stance: 'Senior manager who prefers alignment over disruption, values strategic discipline, and pushes back on last-minute plan revisions.',
@@ -376,7 +370,7 @@ function generateFallbackPersona(
     // Negotiating salary with new employer
     return {
       opponent: {
-        name: 'Rachel Adams',
+        name: 'DealDebate',
         title: 'Senior Talent Acquisition Lead',
         company: 'Vanguard Global Talent',
         stance: 'Recruiter working with strict compensation band ceilings who wants to close the hire quickly without inflating offer packages.',
@@ -393,7 +387,7 @@ function generateFallbackPersona(
   if (sLower.includes('salary') || sLower.includes('manager')) {
     return {
       opponent: {
-        name: 'Rohit Deshmukh',
+        name: 'DealDebate',
         title: 'Senior Engineering Director',
         company: 'CloudMatrix Technologies',
         stance: 'Strict manager managing tight departmental budget bands who requires undeniable, quantified business justification.',
@@ -409,7 +403,7 @@ function generateFallbackPersona(
   if (sLower.includes('vendor') || sLower.includes('pricing') || sLower.includes('supplier')) {
     return {
       opponent: {
-        name: 'Natalie Chen',
+        name: 'DealDebate',
         title: 'VP of Commercial Accounts',
         company: 'Apex Component Solutions',
         stance: 'Commercial vendor lead defending gross margins against client procurement squeezes; highlights inflation and service SLA costs.',
@@ -425,7 +419,7 @@ function generateFallbackPersona(
   // Default: Enterprise Software Deal with CFO
   return {
     opponent: {
-      name: 'Sanjay Mehra',
+      name: 'DealDebate',
       title: 'Chief Financial Officer',
       company: 'Apex Enterprise Group',
       stance: 'Capital preservation hawk; operating under strict quarterly IT capex austerity measures.',
@@ -758,7 +752,7 @@ ${diffGuidance}
 
 MANDATORY ADAPTATION RULES:
 1. "opponent": An opponent persona strictly matching these customized parameters:
-   - "name": realistic executive, debater, landlord, or interviewer name
+   - "name": MUST strictly be "DealDebate" (never use a human personal name like Priya, Rohit, etc.)
    - "title": appropriate title reflecting "${cleanRole || 'Opponent'}"
    - "company": realistic organization, property management firm, B-school panel, or venture fund
    - "stance": their posture specifically addressing the user's role ("${cleanUserRole || 'advocate'}") and proposal
@@ -772,6 +766,7 @@ MANDATORY ADAPTATION RULES:
 2. "openingLine": The opening remark spoken by the opponent to kick off the interaction.
    CRITICAL REQUIREMENTS:
    - LENGTH: EXACTLY 2 to 3 sentences long.
+   - BRANDING & NAME RULE: You MUST NEVER introduce yourself with a human personal name (e.g., NEVER say "I am Priya", "My name is...", "Hello, I am Rohit"). Jump straight into the dialogue and objection in character.
    - It MUST adapt directly to the user's role ("${cleanUserRole || 'candidate/advocate'}"), directly address the motion/scenario ("${cleanScenario}"), and ${cleanDealSize ? `explicitly address or incorporate the stakes/numbers ("${cleanDealSize}")` : 'raise a relevant consideration'}.
    - Respect the difficulty level (${diff}): ${diff === 'EASY' ? 'friendly, simple English, gentle objection' : diff === 'HARD' ? 'brutal, aggressive pushback' : 'firm professional pushback'}.
 
@@ -819,6 +814,7 @@ MANDATORY ADAPTATION RULES:
     const parsed = extractJson<{ opponent: OpponentProfile; openingLine: string; hint?: string }>(response.text);
     if (parsed && parsed.opponent && parsed.openingLine) {
       if (!parsed.opponent.scenarioType) parsed.opponent.scenarioType = cat;
+      parsed.opponent.name = 'DealDebate';
       if (cleanUserRole) parsed.opponent.userRole = cleanUserRole;
       if (cleanDealSize) parsed.opponent.stakes = cleanDealSize;
       parsed.opponent.difficulty = diff;
@@ -907,12 +903,13 @@ LATEST STUDENT STATEMENT:
 "${userMessage}"
 
 RULES:
-1. Stay 100% in character as ${opponent?.name || 'the opponent'}.
+1. Stay 100% in character as DealDebate in the role of ${opponent?.title || 'the counterpart'}.
 2. LENGTH REQUIREMENT: You MUST reply in EXACTLY 2 to 4 sentences.
-3. ${dynamicRules}
-4. ${isFinalRound ? 'Deliver your final verdict/conclusion on the debate/interview/deal. Keep to 2-4 sentences.' : 'Deliver your response.'}
-5. ${diff === 'EASY' ? 'Provide a helpful 1-sentence "hint" for the student on how to respond.' : 'Set "hint" to null.'}
-6. Do NOT break character or offer AI coaching in the dialogue itself.`;
+3. BRANDING & NAME RULE: You MUST NEVER use, mention, or introduce yourself with any human personal name (such as Priya, Rohit, David, etc.).
+4. ${dynamicRules}
+5. ${isFinalRound ? 'Deliver your final verdict/conclusion on the debate/interview/deal. Keep to 2-4 sentences.' : 'Deliver your response.'}
+6. ${diff === 'EASY' ? 'Provide a helpful 1-sentence "hint" for the student on how to respond.' : 'Set "hint" to null.'}
+7. Do NOT break character or offer AI coaching in the dialogue itself.`;
 
     const response = await ai.models.generateContent({
       model: 'gemini-3.8-flash',
