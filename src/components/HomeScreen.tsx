@@ -28,7 +28,7 @@ interface HomeScreenProps {
     category: ScenarioCategory,
     userRole?: string,
     difficulty?: DifficultyLevel
-  ) => Promise<void>;
+  ) => Promise<void> | void;
   isLoading: boolean;
   onOpenHistory?: () => void;
   historyCount?: number;
@@ -73,13 +73,23 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({
     if (e) e.preventDefault();
     if (!activePreset || !setupScenario.trim() || isLoading) return;
 
+    const p = activePreset;
+    const scenarioToStart = setupScenario.trim();
+    const oppRole = setupOpponentRole.trim() || p.opponentRole;
+    const stakesToStart = setupStakes.trim();
+    const cat = p.category;
+    const uRole = setupUserRole.trim() || p.defaultUserRole;
+    const diff = setupDifficulty;
+
+    setActivePreset(null);
+
     onStart(
-      setupScenario.trim(),
-      setupOpponentRole.trim() || activePreset.opponentRole,
-      setupStakes.trim(),
-      activePreset.category,
-      setupUserRole.trim() || activePreset.defaultUserRole,
-      setupDifficulty
+      scenarioToStart,
+      oppRole,
+      stakesToStart,
+      cat,
+      uRole,
+      diff
     );
   };
 
@@ -87,13 +97,18 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({
   const handleSkipAndStart = () => {
     if (!activePreset || isLoading) return;
 
+    const p = activePreset;
+    const diff = setupDifficulty;
+
+    setActivePreset(null);
+
     onStart(
-      activePreset.scenario,
-      activePreset.defaultOpponentRole,
-      activePreset.defaultStakes,
-      activePreset.category,
-      activePreset.defaultUserRole,
-      setupDifficulty
+      p.scenario,
+      p.defaultOpponentRole,
+      p.defaultStakes,
+      p.category,
+      p.defaultUserRole,
+      diff
     );
   };
 

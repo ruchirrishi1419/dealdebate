@@ -42,11 +42,28 @@ export interface WeakLineAnalysis {
   rewrite: string;
 }
 
+export interface StrengthItem {
+  title: string;
+  quote: string;
+  explanation: string;
+}
+
+export interface ImprovementItem {
+  title: string;
+  quote: string;
+  critique: string;
+  rewrite: string;
+}
+
 export interface ReportCard {
   overallScore: number;
   overallGrade: string;
+  verdict: string; // One-line verdict on who won the debate and why
+  winner?: 'USER' | 'OPPONENT' | 'DRAW';
   dealOutcome: string;
   executiveSummary: string;
+  strengths: StrengthItem[]; // 3 specific strengths with quoted moments
+  improvements: ImprovementItem[]; // 3 concrete improvements with rewritten examples
   persuasion: PillarScore;
   handlingObjections: PillarScore;
   concessions: PillarScore;

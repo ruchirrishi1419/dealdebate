@@ -58,6 +58,33 @@ function getAiClient(): GoogleGenAI | null {
   });
 }
 
+// Helper to execute Gemini generation with model fallback (gemini-3.1-flash-lite -> gemini-3.8-flash)
+async function generateGeminiContent(ai: GoogleGenAI, params: {
+  contents: string;
+  config: any;
+}): Promise<string> {
+  const modelsToTry = ['gemini-3.1-flash-lite', 'gemini-3.8-flash'];
+  let lastError: unknown = null;
+
+  for (const model of modelsToTry) {
+    try {
+      const response = await ai.models.generateContent({
+        model,
+        contents: params.contents,
+        config: params.config,
+      });
+      if (response && response.text) {
+        return response.text;
+      }
+    } catch (err: any) {
+      lastError = err;
+      console.warn(`Model ${model} failed, trying next candidate:`, err?.message || err);
+    }
+  }
+
+  throw lastError || new Error('All Gemini models failed to generate content');
+}
+
 // Robust JSON extraction from Gemini response text
 function extractJson<T>(rawText: string | undefined): T | null {
   if (!rawText) return null;
@@ -89,7 +116,7 @@ function extractJson<T>(rawText: string | undefined): T | null {
   return null;
 }
 
-// Infer category from scenario keywords if not provided
+// Infer category from scenario keywords if not explicitly provided
 function inferCategory(scenario: string, category?: string): ScenarioCategory {
   if (
     category === 'NEGOTIATION' || 
@@ -108,35 +135,25 @@ function inferCategory(scenario: string, category?: string): ScenarioCategory {
   }
 
   // Interview
-  if (s.includes('interview') || s.includes('tell me about yourself') || s.includes('candidate') || s.includes('weakness')) {
+  if (s.includes('interview') || s.includes('candidate') || s.includes('tell me about yourself') || s.includes('weakness')) {
     return 'INTERVIEW';
   }
 
   // Everyday skills
-  if (s.includes('landlord') || s.includes('boss') || s.includes('politely') || s.includes('fix something') || s.includes('disagree with')) {
+  if (s.includes('landlord') || s.includes('boss') || s.includes('politely') || s.includes('fix something') || s.includes('disagree with') || s.includes('neighbor')) {
     return 'EVERYDAY_SKILLS';
   }
 
-  // Group discussion
-  if (
-    s.includes('crypto') ||
-    s.includes('wfh') ||
-    s.includes('work from home') ||
-    s.includes('office') ||
-    s.includes('ban') ||
-    s.includes('create more jobs') ||
-    s.includes('group discussion') ||
-    s.includes('gd') ||
-    s.includes('debate') ||
-    s.includes('vs')
-  ) {
-    return 'GROUP_DISCUSSION';
+  // Explicit commercial / business negotiation
+  if (s.includes('salary') || s.includes('raise') || s.includes('vendor') || s.includes('contract negotiation') || s.includes('pricing concession') || s.includes('b2b')) {
+    return 'NEGOTIATION';
   }
 
-  return 'NEGOTIATION';
+  // Group discussion / debates / comparisons / general custom topics
+  return 'GROUP_DISCUSSION';
 }
 
-// Realistic contextual fallback generator matching the exact scenario type
+// Fallback generator strictly loyal to the user's specific topic
 function generateFallbackPersona(
   scenario: string, 
   role?: string, 
@@ -146,322 +163,183 @@ function generateFallbackPersona(
 ): { opponent: OpponentProfile; openingLine: string; hint?: string } {
   const sLower = scenario.toLowerCase();
   const cat = category || inferCategory(scenario);
+  const isEasy = difficulty === 'EASY';
+  const isHard = difficulty === 'HARD';
 
-  // --- EASY MODE: Friendly, simple, encouraging, with hints ---
-  if (difficulty === 'EASY') {
-    let opponentTitle = 'Collaborative Project Lead';
-    let opponentTypeLabel = 'Friendly Counterpart';
-
-    if (cat === 'GROUP_DISCUSSION') {
-      opponentTitle = 'Discussion Panelist';
-      opponentTypeLabel = 'Friendly Debater';
-    } else if (cat === 'INTERVIEW') {
-      opponentTitle = 'Supportive Hiring Manager';
-      opponentTypeLabel = 'Encouraging Interviewer';
-    } else if (cat === 'PITCHING') {
-      opponentTitle = 'Angel Mentor & Investor';
-      opponentTypeLabel = 'Helpful Investor';
-    } else if (cat === 'EVERYDAY_SKILLS') {
-      opponentTitle = 'Property Manager';
-      opponentTypeLabel = 'Reasonable Landlord';
-    } else {
-      opponentTitle = 'Department Director';
-      opponentTypeLabel = 'Cooperative Buyer';
-    }
-
+  // 1. SPORTS: Formula 1, Racing, Motorsports
+  if (sLower.includes('formula 1') || sLower.includes('f1') || sLower.includes('racing') || sLower.includes('motorsport') || sLower.includes('grand prix')) {
     return {
       opponent: {
         name: 'DealDebate',
-        title: role || opponentTitle,
-        company: 'Partnership Group',
-        stance: 'Open-minded, friendly, and willing to agree once simple logical points are explained.',
-        initialObjection: 'Keeping the plan simple, predictable, and fair for both sides.',
-        scenarioType: cat,
-        opponentTypeLabel,
-        difficulty: 'EASY'
-      },
-      openingLine: `Thanks for talking with me today! I'm really open to your idea${dealSize ? ` regarding ${dealSize}` : ''}, but my main goal is making sure this is simple and doesn't create unexpected problems. Could you explain in simple terms what the main benefit is for both of us?`,
-      hint: `Acknowledge their goal warmly and give one clear, simple reason why your proposal benefits both sides.`
-    };
-  }
-
-  // --- 1. GROUP DISCUSSION (Opponent: Debater) ---
-  if (cat === 'GROUP_DISCUSSION') {
-    if (sLower.includes('crypto')) {
-      return {
-        opponent: {
-          name: 'DealDebate',
-          title: 'Senior Policy Debater & Monetary Analyst',
-          company: 'National Economic Forum GD Panel',
-          stance: 'Strongly argues for sovereign capital controls, warning of systemic financial contagion and unregulated retail speculation.',
-          initialObjection: 'Threats to monetary sovereignty, illicit capital flight, and lack of consumer protection.',
-          scenarioType: 'GROUP_DISCUSSION' as ScenarioCategory,
-          opponentTypeLabel: 'Opposing Debater',
-          difficulty
-        },
-        openingLine: `Before we entertain legalization or light-touch regulation, we have to acknowledge that cryptocurrency poses catastrophic risks to India's monetary sovereignty and foreign exchange reserves. Millions of unsophisticated retail investors are being exposed to extreme asset volatility with zero underlying collateral or legal recourse. Why should our central bank endorse an unregulated shadow currency that facilitates capital flight?`
-      };
-    }
-
-    if (sLower.includes('wfh') || sLower.includes('work from home') || sLower.includes('office')) {
-      return {
-        opponent: {
-          name: 'DealDebate',
-          title: 'People Strategy Debater & Operations Lead',
-          company: 'B-School Executive Round Table',
-          stance: 'Defends in-person office collaboration, arguing remote work degrades organizational culture, mentoring, and serendipitous innovation.',
-          initialObjection: 'Erosion of team cohesion, onboarding friction, and long-term creative stagnancy.',
-          scenarioType: 'GROUP_DISCUSSION' as ScenarioCategory,
-          opponentTypeLabel: 'Opposing Debater',
-          difficulty
-        },
-        openingLine: `The productivity gains of remote work are largely illusory and short-lived; you cannot sustain cross-functional innovation or build high-trust company culture through Zoom Brady-bunch grids. Early-career professionals are stagnating without spontaneous osmosis, and cross-departmental alignment has suffered drastically. How do you propose solving the severe decline in tacit knowledge transfer when employees remain permanently siloed at home?`
-      };
-    }
-
-    if (sLower.includes('job') || sLower.includes('ai')) {
-      return {
-        opponent: {
-          name: 'DealDebate',
-          title: 'Labor Economics Debater & Tech Critic',
-          company: 'Global Policy Debate Series',
-          stance: 'Argues AI automates cognitive labor exponentially faster than human retraining can absorb displaced workers.',
-          initialObjection: 'Rapid white-collar obsolescence and acute structural employment friction.',
-          scenarioType: 'GROUP_DISCUSSION' as ScenarioCategory,
-          opponentTypeLabel: 'Opposing Debater',
-          difficulty
-        },
-        openingLine: `Historical analogies to the steam engine or personal computers fall completely flat because generative AI replaces cognitive analytical reasoning rather than manual labor, compressing the disruption timeline from decades into months. Millions of knowledge workers—from paralegals and financial analysts to software engineers—face structural redundancy before new employment ecosystems can possibly emerge. Where exactly are displaced mid-career professionals supposed to transition overnight?`
-      };
-    }
-
-    return {
-      opponent: {
-        name: 'DealDebate',
-        title: 'Lead Debater & Panelist',
-        company: 'Premier B-School GD Caucus',
-        stance: 'Rigorous counter-debater who actively probes weak assumptions, statistical blindspots, and systemic unintended consequences.',
-        initialObjection: 'Challenging underlying premises and highlighting operational trade-offs.',
-        scenarioType: 'GROUP_DISCUSSION' as ScenarioCategory,
-        opponentTypeLabel: 'Opposing Debater',
+        title: role || 'FIA Technical & Race Strategy Analyst',
+        company: 'F1 Paddock Analytics Forum',
+        stance: 'Argues that aerodynamic package, telemetry data, and tire degradation windows determine race outcomes far more than individual driver heroics.',
+        initialObjection: 'Underestimating the overwhelming dominance of constructor aero engineering over pure driver skill.',
+        scenarioType: 'GROUP_DISCUSSION',
+        opponentTypeLabel: 'Motorsport Analyst',
         difficulty
       },
-      openingLine: `I strongly challenge the premise you are putting forward on this topic. When you examine the systemic empirical evidence, the trade-offs and unintended externalities far outweigh the short-term benefits you've outlined. What verifiable data points can you offer to refute the significant structural downsides of your stance?`
+      openingLine: isEasy
+        ? `Formula 1 is thrilling, but look at the engineering data: the fastest aerodynamic package consistently wins 90% of Grand Prix races regardless of driver hype. In simple terms, why do you think driver skill matters as much as the car design?`
+        : isHard
+        ? `Anyone who studies telemetry knows ground-effect downforce and tire degradation windows dictate Grand Prix victories, not romanticized driver talent. Put any competent midfield driver into the championship car and they take poles. How do you defend driver primacy against undeniable aerodynamic supremacy?`
+        : `Look at the telemetry over the past decade: championship outcomes are overwhelmingly dictated by the constructor's wind tunnel efficiency and engine reliability, not driver intangibles. What empirical proof do you have that driver skill can overcome a 0.5-second aero deficit?`,
+      hint: isEasy ? 'Explain how driver input under changing weather or high-pressure race starts can overcome small car deficits.' : undefined
     };
   }
 
-  // --- 2. INTERVIEW (Opponent: Interviewer) ---
-  if (cat === 'INTERVIEW') {
-    if (sLower.includes('tell me about yourself')) {
-      return {
-        opponent: {
-          name: 'DealDebate',
-          title: 'Executive Hiring Director',
-          company: 'Vertex Global Leadership',
-          stance: 'Probes for concise executive presence, distinct competitive positioning, and self-awareness without rehearsed monologues.',
-          initialObjection: 'Filtering out generic career chronological lists to test authentic leadership identity.',
-          scenarioType: 'INTERVIEW' as ScenarioCategory,
-          opponentTypeLabel: 'Executive Interviewer',
-          difficulty
-        },
-        openingLine: `I've read through your resume and career history, but I want to understand what actually drives your decision-making. Tell me about yourself: what is the single through-line that connects your major career leaps, and why does this specific challenge align with your trajectory right now?`
-      };
-    }
-
-    if (sLower.includes('weakness')) {
-      return {
-        opponent: {
-          name: 'DealDebate',
-          title: 'VP of Talent & People',
-          company: 'Apex Horizon Capital',
-          stance: 'Cuts through cliché answers like "perfectionist" to evaluate genuine vulnerability, operational self-awareness, and mitigation systems.',
-          initialObjection: 'Testing whether the candidate has genuine blindspot awareness and accountability mechanisms.',
-          scenarioType: 'INTERVIEW' as ScenarioCategory,
-          opponentTypeLabel: 'Executive Interviewer',
-          difficulty
-        },
-        openingLine: `Please skip the rehearsed answers like 'I care too much' or 'I work too hard'—I want genuine executive self-awareness. What is your single biggest professional weakness or operational blind spot, and what concrete friction did it create in your most recent team?`
-      };
-    }
-
-    // Defend best candidate
+  // 2. SPORTS: Messi vs Ronaldo, Football, Soccer
+  if (sLower.includes('messi') || sLower.includes('ronaldo') || sLower.includes('goat') || sLower.includes('football') || sLower.includes('soccer')) {
     return {
       opponent: {
         name: 'DealDebate',
-        title: 'Managing Director & Panel Lead',
-        company: 'Meridian Capital Partners',
-        stance: 'Exacting executive interviewer who cuts through buzzwords, drills into failure management, and probes behavioral resilience.',
-        initialObjection: 'Testing depth of real accountability versus rehearsed resume bullet points.',
-        scenarioType: 'INTERVIEW' as ScenarioCategory,
-        opponentTypeLabel: 'Senior Interviewer',
+        title: role || 'Senior Football Tactical Analyst',
+        company: 'European Football Digest',
+        stance: 'Challenges one-sided GOAT claims by weighing complete playmaking, progressive passes, and World Cup glory against raw clutch knockout goal scoring across multiple leagues.',
+        initialObjection: 'Equating sheer goal tallies with total tactical game control, or vice versa.',
+        scenarioType: 'GROUP_DISCUSSION',
+        opponentTypeLabel: 'Football Analyst',
         difficulty
       },
-      openingLine: `Your CV looks impressive on paper, but frankly, every finalist in this round has great pedigree and claims outsized impact. What specifically differentiates your execution capability from the other three candidates we interviewed this morning, and why should we take a risk on your leadership?`
+      openingLine: isEasy
+        ? `The Messi versus Ronaldo debate is legendary! Both have won historic trophies, but one side argues pure playmaking and World Cup success, while the other points to unmatched knockout goals across three different top leagues. What is the single most decisive reason your pick is the undisputed greatest?`
+        : isHard
+        ? `Before crowning a definitive GOAT, you cannot cherry-pick stats while ignoring tactical context: Ronaldo dominated the world's most physical leagues and delivered unmatched Champions League knockout clutch goals, whereas Messi's playmaking and World Cup run redefined the game. How do you objectively prove your candidate surpasses the other across all eras and metrics?`
+        : `When comparing Messi and Ronaldo, fans consistently confuse emotional bias with objective football metrics. Are you prioritizing raw goal-scoring clutch factor in the Champions League, or all-around playmaking and international tournament dominance? Make your case.`,
+      hint: isEasy ? 'Pick 1 or 2 specific statistical milestones (like knockout goals or playmaking assists) to anchor your argument.' : undefined
     };
   }
 
-  // --- 3. PITCHING (Opponent: Investor) ---
-  if (cat === 'PITCHING') {
-    if (sLower.includes('2 minute') || sLower.includes('startup')) {
-      return {
-        opponent: {
-          name: 'DealDebate',
-          title: 'Founding Partner',
-          company: 'Nexus Seed Capital',
-          stance: 'Impatient, high-velocity investor looking for immediate clarity on market problem severity, distribution edge, and monetization velocity.',
-          initialObjection: 'Vague problem sizing and lack of proprietary unfair distribution channel.',
-          scenarioType: 'PITCHING' as ScenarioCategory,
-          opponentTypeLabel: 'Venture Partner',
-          difficulty
-        },
-        openingLine: `I have back-to-back partner meetings today, so let's get straight to the point: what urgent, painful problem does your startup solve, and what is your proprietary distribution channel that keeps customer acquisition costs from devouring your margins? Give me your 2-minute pitch.`
-      };
-    }
-
+  // 3. ACADEMICS & COLLEGE LIFE: AI in Colleges, Higher Education, Student Policies
+  if (sLower.includes('college') || sLower.includes('university') || sLower.includes('student') || sLower.includes('ai in') || sLower.includes('academic') || sLower.includes('campus')) {
     return {
       opponent: {
         name: 'DealDebate',
-        title: 'General Partner',
-        company: 'Apex Horizon Ventures',
-        stance: 'Skeptical early-stage investor who aggressively tests unit economics, customer acquisition friction, and defensibility against incumbents.',
-        initialObjection: 'Unproven customer acquisition moats and excessive vulnerability to fast-follower tech giants.',
-        scenarioType: 'PITCHING' as ScenarioCategory,
-        opponentTypeLabel: 'Skeptical Investor',
+        title: role || 'Dean of Academic Policy & Curriculum',
+        company: 'Higher Education Ethics Council',
+        stance: 'Argues generative AI in university coursework fundamentally degrades critical reasoning, original synthesis, and academic integrity.',
+        initialObjection: 'Cognitive atrophy and the collapse of authentic student skill assessment.',
+        scenarioType: 'GROUP_DISCUSSION',
+        opponentTypeLabel: 'Academic Dean',
         difficulty
       },
-      openingLine: `Your pitch deck outlines an attractive total addressable market, but I see virtually zero structural moat against well-capitalized incumbents who can duplicate your core workflow in a single release cycle. On top of that, your CAC-to-LTV payback math looks deeply unrealistic in today's paid acquisition climate. Why should our fund write a seed check before you demonstrate true customer lock-in?`
+      openingLine: isEasy
+        ? `AI in college classrooms is a major conversation right now. While AI tools help students research faster, educators worry that students might lose the ability to write and think through complex problems independently. How can universities encourage learning without students just taking the easy way out?`
+        : isHard
+        ? `Permitting generative AI into higher education coursework actively accelerates cognitive atrophy, converting rigorous critical synthesis into prompt outsourcing. When students rely on LLMs for analytical essays and code architecture, university credentials become meaningless paper. Why should academia endorse a tool that atrophies the exact skills we exist to cultivate?`
+        : `While AI literacy is clearly a modern workplace skill, integrating AI into standard college assessments directly threatens foundational problem-solving and authentic grading. How can universities maintain accreditation standards if students outsource original analysis to algorithms?`,
+      hint: isEasy ? 'Suggest a balanced policy where AI is used for brainstorming and research, while core examinations remain human.' : undefined
     };
   }
 
-  // --- 4. EVERYDAY SKILLS (Opponent: Landlord, Boss, Recruiter) ---
-  if (cat === 'EVERYDAY_SKILLS') {
-    if (sLower.includes('landlord') || sLower.includes('fix') || sLower.includes('apartment') || sLower.includes('rent')) {
-      return {
-        opponent: {
-          name: 'DealDebate',
-          title: 'Property Owner & Landlord',
-          company: 'Highland Residential Management',
-          stance: 'Reluctant, budget-averse landlord who deflects maintenance requests, delays repairs, and questions the severity of the issue.',
-          initialObjection: 'Avoids costly vendor call-outs and insists routine wear-and-tear is tenant responsibility.',
-          scenarioType: 'EVERYDAY_SKILLS' as ScenarioCategory,
-          opponentTypeLabel: 'Reluctant Landlord',
-          difficulty
-        },
-        openingLine: `Look, I received your message about the issue, but our maintenance contractor charges emergency rates and the building was inspected just four months ago. Most tenants manage minor plumbing or appliance quirks themselves without needing expensive call-outs. Why can't this wait until our regular quarterly vendor visit next month?`
-      };
-    }
-
-    if (sLower.includes('boss') || sLower.includes('disagree') || sLower.includes('politely')) {
-      return {
-        opponent: {
-          name: 'DealDebate',
-          title: 'Vice President & Direct Manager',
-          company: 'Enterprise Strategy Group',
-          stance: 'Senior manager who prefers alignment over disruption, values strategic discipline, and pushes back on last-minute plan revisions.',
-          initialObjection: 'Wants solid data before altering a strategy that has already been approved by executive stakeholders.',
-          scenarioType: 'EVERYDAY_SKILLS' as ScenarioCategory,
-          opponentTypeLabel: 'Direct Boss',
-          difficulty
-        },
-        openingLine: `I hear that you have concerns about the Q3 project roadmap, but this rollout strategy was already cleared with the leadership committee two weeks ago. Reopening the plan now introduces major delivery risk and delays our milestones. If you want to challenge this direction, what specific data or operational blocker are you seeing that the rest of the team missed?`
-      };
-    }
-
-    // Negotiating salary with new employer
+  // 4. MOVIES & POP CULTURE
+  if (sLower.includes('movie') || sLower.includes('film') || sLower.includes('cinema') || sLower.includes('actor') || sLower.includes('director') || sLower.includes('marvel') || sLower.includes('dc')) {
     return {
       opponent: {
         name: 'DealDebate',
-        title: 'Senior Talent Acquisition Lead',
-        company: 'Vanguard Global Talent',
-        stance: 'Recruiter working with strict compensation band ceilings who wants to close the hire quickly without inflating offer packages.',
-        initialObjection: 'Compensation bands are calibrated against internal equity, and requests for higher base require tradeoffs.',
-        scenarioType: 'EVERYDAY_SKILLS' as ScenarioCategory,
-        opponentTypeLabel: 'Hiring Recruiter',
+        title: role || 'Film Critic & Cultural Analyst',
+        company: 'Cinema Discourse Review',
+        stance: 'Scrutinizes storytelling depth, character arcs, and cinematic originality against commercial box office spectacle.',
+        initialObjection: 'Confusing commercial franchise popularity with cinematic craftsmanship.',
+        scenarioType: 'GROUP_DISCUSSION',
+        opponentTypeLabel: 'Film Critic',
         difficulty
       },
-      openingLine: `We are thrilled to extend this offer and believe you will do great work with the team, but the compensation package we outlined reflects the top percentile of our budget band for this tier. We want to wrap up this search this week. What specific benchmark or consideration makes you feel an adjustment is necessary before signing?`
+      openingLine: isEasy
+        ? `Cinema debates are always great to explore! When looking at this topic, people often debate artistic storytelling versus pure entertainment value. What is the single biggest reason behind your perspective?`
+        : `Popularity at the box office is completely separate from narrative rigor, character development, and directorial vision. How do you defend your stance without relying on subjective fan nostalgia?`,
+      hint: isEasy ? 'Cite one specific scene or character arc to demonstrate your point clearly.' : undefined
     };
   }
 
-  // --- 5. NEGOTIATION (Opponent: CFO, Manager, Vendor) ---
-  if (sLower.includes('salary') || sLower.includes('manager')) {
+  // 5. CORPORATE & COMMERCIAL NEGOTIATION (Explicitly business topics)
+  if (sLower.includes('salary') || sLower.includes('raise') || sLower.includes('compensation')) {
     return {
       opponent: {
         name: 'DealDebate',
-        title: 'Senior Engineering Director',
-        company: 'CloudMatrix Technologies',
+        title: role || 'Senior Division Director',
+        company: 'Operations Leadership Board',
         stance: 'Strict manager managing tight departmental budget bands who requires undeniable, quantified business justification.',
-        initialObjection: 'Fixed compensation band limits and fairness across the existing engineering peer group.',
-        scenarioType: 'NEGOTIATION' as ScenarioCategory,
-        opponentTypeLabel: 'Division Manager',
+        initialObjection: 'Fixed compensation band limits and fairness across the existing peer group.',
+        scenarioType: 'NEGOTIATION',
+        opponentTypeLabel: 'Division Director',
         difficulty
       },
-      openingLine: `I appreciate you scheduling this, but as you know, our division is under strict guidance from leadership to cap compensation adjustments at standard merit increases this cycle. ${dealSize ? `An adjustment of ${dealSize}` : 'An out-of-cycle compensation increase'} would disrupt equity across your entire peer band. What extraordinary, revenue-impacting outcomes did you drive this past quarter that justify overriding established HR bands?`
+      openingLine: `I appreciate you scheduling this, but our division is under clear guidance from executive leadership to cap compensation adjustments this cycle. An out-of-cycle increase would disrupt equity across your entire peer band. What extraordinary, quantified impact did you drive this past quarter that justifies an exception?`,
+      hint: difficulty === 'EASY' ? 'Highlight 2 concrete accomplishments with numbers that made your manager look great.' : undefined
     };
   }
 
-  if (sLower.includes('vendor') || sLower.includes('pricing') || sLower.includes('supplier')) {
+  if (sLower.includes('vendor') || sLower.includes('pricing') || sLower.includes('discount') || sLower.includes('contract')) {
     return {
       opponent: {
         name: 'DealDebate',
-        title: 'VP of Commercial Accounts',
-        company: 'Apex Component Solutions',
-        stance: 'Commercial vendor lead defending gross margins against client procurement squeezes; highlights inflation and service SLA costs.',
-        initialObjection: 'Upstream supply chain inflation and maintaining dedicated account support levels.',
-        scenarioType: 'NEGOTIATION' as ScenarioCategory,
-        opponentTypeLabel: 'Supplier Executive',
+        title: role || 'VP of Commercial Accounts',
+        company: 'Enterprise Supply Solutions',
+        stance: 'Defending contract margins against procurement squeezes while emphasizing service level quality.',
+        initialObjection: 'Maintaining premium SLA support without taking a loss on pricing.',
+        scenarioType: 'NEGOTIATION',
+        opponentTypeLabel: 'Commercial Executive',
         difficulty
       },
-      openingLine: `${dealSize ? `Your request for ${dealSize}` : 'A major pricing concession'} is completely detached from the reality of our current cost baseline, especially when raw input and freight expenses have risen 12% over the last year. We already provide dedicated technical account management and priority delivery that your team depends on daily. Why should our business subsidize your budget cuts by taking a loss on this contract?`
+      openingLine: `A major pricing concession is difficult to reconcile with our current delivery costs, especially with dedicated 24/7 technical support included. Why should we take a margin cut on this contract when our service standards save your team significant downtime?`,
+      hint: difficulty === 'EASY' ? 'Offer a trade-off: a longer commitment or case study in exchange for the price adjustment.' : undefined
     };
   }
 
-  // Default: Enterprise Software Deal with CFO
+  // 6. GENERAL CUSTOM TOPIC (ANY other topic - Food, Philosophy, Politics, Life, Science)
+  // NEVER fall back to CFO or enterprise software!
+  const topicShort = scenario.length > 30 ? scenario.slice(0, 28) + '...' : scenario;
   return {
     opponent: {
       name: 'DealDebate',
-      title: 'Chief Financial Officer',
-      company: 'Apex Enterprise Group',
-      stance: 'Capital preservation hawk; operating under strict quarterly IT capex austerity measures.',
-      initialObjection: 'Unsubstantiated ROI and excessive upfront cash outlay versus existing legacy systems.',
-      scenarioType: 'NEGOTIATION' as ScenarioCategory,
-      opponentTypeLabel: 'Hesitant CFO',
+      title: role || `Debate Specialist on ${topicShort}`,
+      company: 'Topic Discourse & Review Panel',
+      stance: `Constructively challenges assumptions regarding "${scenario}", raising strong counter-arguments and testing evidence.`,
+      initialObjection: `Critical trade-offs and counter-evidence concerning "${scenario}".`,
+      scenarioType: cat,
+      opponentTypeLabel: 'Opposing Debater',
       difficulty
     },
-    openingLine: `I only have fifteen minutes, and to be blunt, your ${dealSize ? `${dealSize}` : 'software'} proposal is facing severe headwinds against our mandate to cut discretionary IT spend. We already have functional legacy workflows, so unless you can prove immediate hard-dollar payback within two quarters, I cannot justify approving this. Why should this be our priority right now?`
+    openingLine: isEasy
+      ? `That is a really interesting perspective on "${scenario}"! There are two distinct sides to this topic, and many people feel differently. What is the single strongest argument or real-world example you have to support your stance?`
+      : isHard
+      ? `When examining "${scenario}", proponents almost always overlook the strongest contradictory facts and systemic downsides. What verified evidence or logical foundation proves your stance on this topic holds up under rigorous cross-examination?`
+      : `When people discuss "${scenario}", they frequently rely on general assumptions rather than testing the core trade-offs. What specific evidence makes your conclusion on this topic more compelling than the counter-perspective?`,
+    hint: isEasy ? 'State your position clearly and back it up with one concrete fact, statistic, or everyday example.' : undefined
   };
 }
 
-// Fallback turns based on scenario category and difficulty
+// Fallback turns based on scenario category and difficulty (strictly topic-faithful)
 function generateFallbackTurn(
   round: number, 
   userMessage: string, 
-  opponentName: string, 
+  opponentTitle: string, 
   isFinal: boolean, 
-  category?: ScenarioCategory,
+  scenario: string,
   difficulty: DifficultyLevel = 'EASY'
 ): { reply: string; sentiment: string; currentFocus: string; hint?: string } {
-  const cat = category || 'NEGOTIATION';
+  const shortSnippet = userMessage.slice(0, 60);
 
-  // --- EASY MODE: Gives in after 2-3 good answers, simple English, friendly tone, helpful hints ---
+  // EASY MODE: Friendly, concessions after 2-3 turns
   if (difficulty === 'EASY') {
     if (isFinal || round >= 3) {
       return {
-        reply: `You've made a really sensible and clear point here! The way you explained it makes complete sense, and I'm very happy to agree with your proposal. Let's move forward together!`,
+        reply: `You make an excellent point regarding "${scenario}". When you highlighted that reasoning, you effectively addressed my main doubts. I concede to your argument on this topic—well reasoned and clearly argued!`,
         sentiment: 'supportive',
-        currentFocus: 'Agreement reached & confirmed',
-        hint: `Confirm the agreement and thank them for collaborating with you.`
+        currentFocus: 'Agreement reached & points conceded',
+        hint: `Thank DealDebate for the discussion and summarize your final conclusion.`
       };
     }
 
     const easyResponses = [
       {
-        reply: `That sounds like a good direction! My main concern is just making sure this doesn't create unexpected work or extra costs for us. Could you explain simply how we keep things smooth?`,
-        hint: `Reassure them in simple words: mention that the transition will be gradual and supported step-by-step.`
+        reply: `That is a thoughtful point on "${scenario}", but how do you address the common counter-argument that opponents frequently cite?`,
+        hint: `Acknowledge that counter-arguments exist, then explain why your chosen evidence outweighs them.`
       },
       {
-        reply: `I appreciate you clarifying that! If we agree to this, what is the single biggest win our team will notice right away?`,
-        hint: `Highlight one concrete, practical benefit that makes their daily work easier.`
+        reply: `I see where you are coming from with "${shortSnippet}"! If you had to pick the single most convincing piece of evidence for your side on "${scenario}", what would it be?`,
+        hint: `Give one strong, memorable fact or specific example to seal your argument.`
       }
     ];
 
@@ -469,209 +347,231 @@ function generateFallbackTurn(
     return {
       reply: chosen.reply,
       sentiment: 'friendly',
-      currentFocus: 'Simple clarification',
+      currentFocus: 'Exploring evidence and clarifying points',
       hint: chosen.hint
     };
   }
 
-  // --- HARD MODE: Brutal, demanding, sharp vocabulary ---
+  // HARD MODE: Sharp, relentless counter-arguments
   if (difficulty === 'HARD') {
     if (isFinal) {
       return {
-        reply: `We have scrutinized your assertions across every round, and while you demonstrated tenacity, your risk-adjusted metrics remain precarious. Unless you agree to an immediate 15% discount and indemnify our downside risk, we are terminating this discussion.`,
+        reply: `We have pushed your thesis through all 6 rounds on "${scenario}". While you showed tenacity, your stance still relies on selective examples and vulnerable assumptions against verified counter-evidence. The debate remains contested.`,
         sentiment: 'hardline',
-        currentFocus: 'Definitive ultimatum & contractual leverage'
+        currentFocus: 'Final verdict & critique of logical vulnerabilities'
       };
     }
 
     const hardResponses = [
-      `Your premise collapses the moment we stress-test it against real-world volatility. What empirical benchmark justifies our absorption of your execution risk?`,
-      `You are deflecting from the primary fiscal vulnerability. Give me verified unit metrics, not optimistic assertions that gloss over downstream churn.`,
-      `Your competitor guarantees 99.9% operational uptime with full liquidated damages at this identical price point. Why should our executive committee accept your inferior terms?`
+      `Your premise on "${scenario}" collapses the moment we stress-test it against contradictory real-world evidence. What verifiable empirical facts prove your assertion isn't an isolated anomaly?`,
+      `You are deflecting from the core dilemma in "${scenario}". If your stance were truly robust, it would directly resolve opposing precedent rather than sidestepping it. Defend that contradiction directly.`,
+      `That argument is logically inconsistent with what you stated earlier about "${scenario}". You cannot claim universal validity while discounting documented counter-examples in the same domain.`
     ];
 
     return {
       reply: hardResponses[(round - 1) % hardResponses.length],
       sentiment: 'aggressive',
-      currentFocus: 'Scrutinizing systemic flaws & competitive alternatives'
+      currentFocus: 'Dissecting contradictions & demanding empirical proof'
     };
   }
 
-  // --- MEDIUM MODE: Standard realistic behavior ---
-  if (cat === 'GROUP_DISCUSSION') {
-    if (isFinal) {
-      return {
-        reply: `To synthesize our discussion, while your arguments raised interesting perspectives, the fundamental vulnerabilities regarding regulation and operational scale remain unresolved. A balanced consensus must prioritize systemic risk containment rather than unmitigated adoption. Let's see if the broader panel agrees on where the boundary line should be drawn.`,
-        sentiment: 'calculating',
-        currentFocus: 'Synthesis & core systemic trade-offs'
-      };
-    }
-    const gdResponses = [
-      `You're treating the issue as an isolated hypothetical, but in the real world, unintended secondary consequences will destabilize the entire framework. What regulatory mechanism ensures your proposed model doesn't create larger socio-economic vulnerabilities?`,
-      `That argument sounds persuasive in isolation, but empirical case studies in international markets prove the exact opposite outcome occurred under similar circumstances. How do you account for that clear contradiction in your thesis?`,
-      `You've highlighted the upside for early adopters, but you are completely glossing over who pays the economic cost when the transition fails. In any sound group discussion, we must address the most vulnerable stakeholders first.`,
-      `I concede you made a fair point regarding short-term momentum, but long-term sustainability is where your argument breaks down. What happens when market liquidity dries up or enforcement resources are overwhelmed?`
-    ];
-    return {
-      reply: gdResponses[(round - 1) % gdResponses.length],
-      sentiment: 'skeptical',
-      currentFocus: 'Challenging empirical validity & systemic risk'
-    };
-  }
-
-  if (cat === 'INTERVIEW') {
-    if (isFinal) {
-      return {
-        reply: `I appreciate your composure through these tough questions today; you've defended your positioning with solid conviction. We have two other candidates to review this afternoon, but I'll make sure our hiring committee assesses your core differentiators closely before our final decision.`,
-        sentiment: 'calculating',
-        currentFocus: 'Final assessment & candidate differentiation'
-      };
-    }
-    const interviewResponses = [
-      `Anyone can recite textbook answers, but I need to see how you execute when resources are constrained and team morale is sinking. Give me specific operational metrics, not high-level philosophy.`,
-      `That sounds fine on paper, but your assumptions about speed and cross-functional buy-in seem overly optimistic. What was the single biggest friction point you encountered in that initiative?`,
-      `You've highlighted your technical strengths, but I'm looking for where you rely on complementary leadership. When a market dispute arises, how do you handle being overruled by executive peers?`,
-      `I'm still looking for greater depth on your personal contribution. What specific decision did you make that nobody else on that project was willing to champion?`
-    ];
-    return {
-      reply: interviewResponses[(round - 1) % interviewResponses.length],
-      sentiment: 'guarded',
-      currentFocus: 'Drilling down into depth and authenticity'
-    };
-  }
-
-  if (cat === 'PITCHING') {
-    if (isFinal) {
-      return {
-        reply: `I appreciate your hustle and the clarity of your vision today. I'm going to take this to our Monday investment committee with some reservations around CAC expansion, but if your data room checks out, we'll schedule a partner meeting next week.`,
-        sentiment: 'calculating',
-        currentFocus: 'Partner meeting criteria & data room diligence'
-      };
-    }
-    const pitchResponses = [
-      `Your top-line market projections look attractive, but how does your unit economics hold up once paid acquisition costs inevitably spike by 30% next quarter?`,
-      `What stops a well-capitalized competitor with existing enterprise distribution from building this exact workflow into their core suite and bundling it for free?`,
-      `Your current churn numbers look acceptable for early adopters, but what happens when you scale into mainstream, price-sensitive enterprise accounts?`,
-      `You're asking for capital, but your milestone roadmap doesn't clearly show how this runway gets you to default-alive profitability. Walk me through the exact capital allocation.`
-    ];
-    return {
-      reply: pitchResponses[(round - 1) % pitchResponses.length],
-      sentiment: 'skeptical',
-      currentFocus: 'Scrutinizing unit economics, churn, and defensibility'
-    };
-  }
-
-  if (cat === 'EVERYDAY_SKILLS') {
-    if (isFinal) {
-      return {
-        reply: `Alright, I hear your points and respect the professional way you've laid this out. I cannot approve everything you asked for right now, but I will authorize the primary request starting next week if we agree on the parameters we've discussed. Let's get this in writing today.`,
-        sentiment: 'calculating',
-        currentFocus: 'Final mutual agreement & terms confirmation'
-      };
-    }
-    const everydayResponses = [
-      `I understand your frustration, but there are contractual procedures and budget constraints on our side that you aren't accounting for here.`,
-      `If we make an exception for this specific issue, it sets an unsustainable precedent across the rest of the organization or building. What compromise can you offer on the timing?`,
-      `You're asking for an immediate resolution, but you haven't provided verifiable documentation of when this issue began. Why wasn't this raised during our initial review?`,
-      `I can look into partial support, but our standard policy requires shared responsibility for this type of adjustment. How willing are you to meet halfway?`
-    ];
-    return {
-      reply: everydayResponses[(round - 1) % everydayResponses.length],
-      sentiment: 'skeptical',
-      currentFocus: 'Enforcing policy boundaries and exploring compromises'
-    };
-  }
-
-  // Negotiation turns (MEDIUM)
+  // MEDIUM MODE: Standard balanced pushback
   if (isFinal) {
     return {
-      reply: `I've considered your points throughout this discussion, but I cannot sign off on these terms as currently configured. If you can formalize the SLA guarantees and trim another 8% off the total commitment, I will present a conditional pilot to the board next month. Otherwise, we will keep our current processes in place.`,
-      sentiment: 'hardline',
-      currentFocus: 'Final board review conditions & price compromise'
+      reply: `To conclude our debate on "${scenario}", you have defended your thesis with solid reasoning and handled key questions well. However, the opposing counter-perspective still carries substantial weight. It is a balanced resolution, and you made a strong case.`,
+      sentiment: 'calculating',
+      currentFocus: 'Synthesis & balanced final resolution'
     };
   }
 
-  const responses = [
-    `That sounds appealing in a slide deck, but you're asking us to take on substantial upfront execution risk while your margins remain protected. How do we ensure we aren't left holding the bag if milestones slip?`,
-    `You're asking for our commitment, but you haven't addressed our core constraint around budget allocation for this quarter. What specific flexibility can you offer on the commercial terms or milestone payments?`,
-    `Our technical committee reviewed similar proposals last month, and your competitors are offering 24/7 dedicated support and migration credits at this exact price point. What makes your solution worth paying a premium?`,
-    `I appreciate the value proposition, but my directive is to minimize operational disruption and cut capital outlays. If you want us to move forward, you need to bring something more tangible to the table regarding risk sharing.`
+  const mediumResponses = [
+    `That sounds persuasive regarding "${scenario}", but documented cases show alternative outcomes under similar conditions. How do you reconcile that discrepancy?`,
+    `You've highlighted the strongest merits of your view on "${scenario}", but you are overlooking the significant trade-offs. In an objective debate, those trade-offs cannot simply be dismissed.`,
+    `I grant that your point has merit in specific contexts, but it fails as a universal standard for "${scenario}". What boundary conditions limit your conclusion?`
   ];
 
   return {
-    reply: responses[(round - 1) % responses.length],
+    reply: mediumResponses[(round - 1) % mediumResponses.length],
     sentiment: 'skeptical',
-    currentFocus: 'Scrutinizing risk allocation & competitive alternatives'
+    currentFocus: 'Testing boundaries and challenging trade-offs'
   };
 }
 
-// Fallback report card evaluator
-function generateFallbackReport(scenario: string, opponent: OpponentProfile, history: ChatTurn[], category?: ScenarioCategory) {
+// Fallback report card evaluator matching the clear, impressive structure
+function generateFallbackReport(
+  scenario: string, 
+  opponent: OpponentProfile, 
+  history: ChatTurn[], 
+  category?: ScenarioCategory,
+  difficulty: DifficultyLevel = 'EASY'
+) {
   const userMessages = history.filter(h => h.role === 'user').map(h => h.content);
-  const sample1 = userMessages[0] || 'We believe this stance is justified by our unique value proposition.';
-  const sample2 = userMessages[Math.min(1, userMessages.length - 1)] || 'We can offer flexibility if we align on terms.';
-  const sampleLast = userMessages[userMessages.length - 1] || 'We hope we can reach an agreement that works for both sides.';
+  const sample1 = userMessages[0] || `I believe the evidence clearly supports this stance based on verified comparative records on ${scenario}.`;
+  const sample2 = userMessages[Math.min(1, userMessages.length - 1)] || `While there are valid counterpoints, the fundamental impact remains decisive.`;
+  const sampleLast = userMessages[userMessages.length - 1] || `In conclusion, the balance of evidence firmly establishes this position on ${scenario} as the most compelling.`;
 
-  const weakQuote1 = sample2.length > 10 ? sample2 : sample1;
-  const weakQuote2 = sampleLast.length > 10 ? sampleLast : sample1;
+  const quote1 = sample1.length > 100 ? sample1.slice(0, 95) + '...' : sample1;
+  const quote2 = sample2.length > 100 ? sample2.slice(0, 95) + '...' : sample2;
+  const quote3 = sampleLast.length > 100 ? sampleLast.slice(0, 95) + '...' : sampleLast;
 
-  const cat = category || opponent.scenarioType || inferCategory(scenario);
-
-  let outcome = 'Conditional Pilot Term Sheet under Review with 10% Margin Concession';
-  if (cat === 'GROUP_DISCUSSION') {
-    outcome = 'GD Panel Consensus Reached: Stood Out as Thought Leader with Strong Rebuttals';
-  } else if (cat === 'INTERVIEW') {
-    outcome = 'Advanced to Final Executive Partner Round with Recommendation';
-  } else if (cat === 'PITCHING') {
-    outcome = 'Term Sheet Diligence Approved for Partner Meeting Review';
-  } else if (cat === 'EVERYDAY_SKILLS') {
-    outcome = 'Favorable Resolution Reached with Formal Commitment';
+  if (difficulty === 'EASY') {
+    return {
+      overallScore: 9.0,
+      overallGrade: 'A',
+      winner: 'USER' as const,
+      verdict: `Great Job! You shared clear, thoughtful points on "${scenario}" and stood your ground with friendly confidence.`,
+      dealOutcome: `Debate Won: Wonderful Beginner Debut`,
+      executiveSummary: `You did a fantastic job in your beginner debate on "${scenario}". Your everyday examples were clear and you listened well to DealDebate (${opponent.title}).`,
+      strengths: [
+        {
+          title: 'Clear Everyday Point',
+          quote: `"${quote1}"`,
+          explanation: `You stated your personal viewpoint in simple, clear words so anyone could understand your main idea right away.`
+        },
+        {
+          title: 'Polite and Steady Response',
+          quote: `"${quote2}"`,
+          explanation: 'When asked a follow-up question, you stayed calm, polite, and kept explaining your reasons nicely.'
+        },
+        {
+          title: 'Friendly Wrap-Up',
+          quote: `"${quote3}"`,
+          explanation: `You finished your thoughts with a neat closing statement on "${scenario}".`
+        }
+      ],
+      improvements: [
+        {
+          title: 'Add One Specific Example',
+          quote: `"${quote1.slice(0, 65)}..."`,
+          critique: 'Sharing one simple real-life story or everyday example helps people picture your point easily.',
+          rewrite: 'For example, think about how often this happens in everyday life—it really proves my point.'
+        },
+        {
+          title: 'Keep Sentences Simple & Direct',
+          quote: `"${quote2.slice(0, 65)}..."`,
+          critique: 'When you hesitate, just state your main thought in one short sentence.',
+          rewrite: 'I hear your point, but here is why my side still makes more practical sense.'
+        },
+        {
+          title: 'Strong Finish',
+          quote: `"${quote3.slice(0, 65)}..."`,
+          critique: 'Finish with a smile and a clear summary sentence.',
+          rewrite: 'Overall, that is why this is the best and most sensible way forward.'
+        }
+      ],
+      persuasion: {
+        score: 9,
+        reason: `Your points were relatable and easy to follow on "${scenario}".`
+      },
+      handlingObjections: {
+        score: 9,
+        reason: `You handled every gentle question with kindness and great composure.`
+      },
+      concessions: {
+        score: 8,
+        reason: `You acknowledged the other side nicely while keeping your main opinion intact.`
+      },
+      closing: {
+        score: 9,
+        reason: `A very warm and encouraging closing argument to conclude your debate.`
+      },
+      weakestLines: [
+        {
+          original: quote2,
+          critique: 'A little brief when explaining your reason.',
+          rewrite: 'I hear your point, but here is why my side still makes more practical sense.'
+        },
+        {
+          original: quote3,
+          critique: 'Could end with an even more cheerful final sentence.',
+          rewrite: 'Overall, that is why this is the best and most sensible way forward.'
+        }
+      ],
+      topTip: 'Keep sharing real everyday examples—they make your arguments fun and memorable!'
+    };
   }
 
   return {
-    overallScore: 8.0,
-    overallGrade: 'B+',
-    dealOutcome: outcome,
-    executiveSummary: `You demonstrated clear reasoning, persistent composure, and articulate defense throughout all 6 rounds with ${opponent.name}. Your foundational arguments were sound, though sharpening your quantitative proof earlier would have defused skepticism faster.`,
+    overallScore: difficulty === 'HARD' ? 7.8 : 8.5,
+    overallGrade: difficulty === 'HARD' ? 'B+' : 'A-',
+    winner: 'USER' as const,
+    verdict: difficulty === 'HARD'
+      ? `Victory for User under High Pressure: You withstood aggressive cross-examination on "${scenario}" and defended key logical vulnerabilities.`
+      : `Victory for User: You maintained unwavering topic focus throughout all 6 rounds on "${scenario}", effectively neutralizing DealDebate's skepticism with structured reasoning.`,
+    dealOutcome: `Debate Won: Persuasive Argument Sustained`,
+    executiveSummary: `Across 6 intensive rounds on "${scenario}", you demonstrated solid composure, agile reframing, and consistent topic loyalty against DealDebate (${opponent.title}).`,
+    strengths: [
+      {
+        title: 'Strong Opening Thematic Stance',
+        quote: `"${quote1}"`,
+        explanation: `You immediately established the analytical terms of the debate on "${scenario}" rather than letting the opponent dictate the framing.`
+      },
+      {
+        title: 'Defused Counter-Arguments under Pressure',
+        quote: `"${quote2}"`,
+        explanation: 'You absorbed the opponent’s skepticism directly and pivoted back to your core thesis without becoming defensive.'
+      },
+      {
+        title: 'Decisive Closing Synthesis',
+        quote: `"${quote3}"`,
+        explanation: `Your final statement wrapped up the dialogue on "${scenario}" by synthesizing your key differentiators with high conviction.`
+      }
+    ],
+    improvements: [
+      {
+        title: 'Unnecessary Concession on Consistency',
+        quote: `"${quote2.slice(0, 65)}..."`,
+        critique: 'You acknowledged a potential flaw without immediately tying it back to a compensating strength on this topic.',
+        rewrite: 'Even acknowledging those trade-offs, the net performance advantage remains overwhelmingly superior.'
+      },
+      {
+        title: 'Over-Reliance on Generalities',
+        quote: `"${quote1.slice(0, 65)}..."`,
+        critique: 'Opening assertions carry significantly more weight when anchored to a specific real-world example or statistic.',
+        rewrite: 'The empirical record proves this: when examined under identical conditions, the outcome consistently favors this position.'
+      },
+      {
+        title: 'Passive Closing Phrasing',
+        quote: `"${quote3.slice(0, 65)}..."`,
+        critique: 'Tentative language in the final round surrenders command of the outcome.',
+        rewrite: 'The evidence presented across these rounds leaves no doubt: this conclusion stands as the only logically consistent outcome.'
+      }
+    ],
     persuasion: {
-      score: 8,
-      reason: `When you stated "${sample1.slice(0, 100)}...", you established strong logical framing, though grounding it in concrete metrics or third-party benchmarks would have made your argument bulletproof.`
+      score: difficulty === 'HARD' ? 7 : 8,
+      reason: `When you stated "${quote1.slice(0, 60)}...", you established clear conviction and thematic relevance for "${scenario}".`
     },
     handlingObjections: {
-      score: 8,
-      reason: `You maintained poise under tough pushback. In responses like "${sample2.slice(0, 90)}...", you addressed the surface objection, but could have isolated ${opponent.name}'s underlying concerns more decisively.`
+      score: difficulty === 'HARD' ? 8 : 8,
+      reason: `Under direct scrutiny, you maintained poise and addressed DealDebate's objections with structured arguments.`
     },
     concessions: {
-      score: 7,
-      reason: `You held your core position well without unraveling, but occasionally signaled soft flexibility without demanding equal conceptual or commercial concessions in return.`
+      score: difficulty === 'HARD' ? 7 : 8,
+      reason: `You conceded minor nuances appropriately without surrendering the central thesis of the debate.`
     },
     closing: {
-      score: 8,
-      reason: `In Round 6, when you stated "${sampleLast.slice(0, 100)}...", you delivered a cohesive wrap-up that maintained forward momentum and established a clear basis for decision.`
+      score: difficulty === 'HARD' ? 8 : 9,
+      reason: `In Round 6, you delivered a crisp, synthesized conclusion that left no unresolved vulnerabilities.`
     },
     weakestLines: [
       {
-        original: weakQuote1.slice(0, 120),
-        critique: 'This line ceded tactical initiative by appearing slightly defensive rather than reframing the dialogue around mutual upside.',
-        rewrite: 'Let us ground this in verified outcomes: our framework eliminates this operational bottleneck while preserving margin and compliance.'
+        original: quote2,
+        critique: 'Appeared slightly tentative in defending against the opponent’s counter-example.',
+        rewrite: 'Even acknowledging those trade-offs, the net advantage remains overwhelmingly superior.'
       },
       {
-        original: weakQuote2.slice(0, 120),
-        critique: 'Ending with tentative or hopeful framing transfers command of the discussion over to your opponent.',
-        rewrite: 'Based on the evidence we have established across these core pillars, the highest-ROI decision is to greenlight this phased implementation immediately.'
+        original: quote3,
+        critique: 'Could have closed with an even firmer finality.',
+        rewrite: 'The evidence presented across these rounds leaves no doubt that this conclusion is definitive.'
       }
     ],
-    topTip: cat === 'GROUP_DISCUSSION' 
-      ? 'Acknowledge the opponent’s valid nuance in one clause before pivoting immediately with a higher-order principle ("The Agree & Pivot Rule").'
-      : cat === 'INTERVIEW'
-      ? 'Anchor answers in the "Situation-Action-Quantified Impact" formula to leave zero room for follow-up skepticism.'
-      : cat === 'PITCHING'
-      ? 'Always answer investor questions with traction data first, followed by unit economic justification.'
-      : 'Never grant a concession without immediately attaching a reciprocal demand ("The If/Then Rule of Negotiation").'
+    topTip: difficulty === 'HARD'
+      ? 'Under aggressive cross-examination, anchor your assertions to empirical data before making broad claims.'
+      : 'Always follow a concession with an immediate "however" clause that highlights an insurmountable advantage on your side.'
   };
 }
 
-// 1. Initialize Negotiation / Debate / Interview / Pitch / Everyday
+// 1. Initialize Simulation Opponent (Strict Topic Fidelity)
 app.post('/api/negotiation/init', async (req: Request, res: Response) => {
   const { scenario, opponentRole, dealSize, stakes, userRole, category, difficulty } = req.body;
   if (!scenario || typeof scenario !== 'string' || scenario.trim() === '') {
@@ -693,90 +593,63 @@ app.post('/api/negotiation/init', async (req: Request, res: Response) => {
     if (!ai) {
       console.warn('GEMINI_API_KEY not configured. Serving intelligent fallback simulation.');
       const fallback = generateFallbackPersona(cleanScenario, cleanRole, cleanDealSize, cat, diff);
-      if (cleanUserRole && fallback.opponent) {
-        fallback.opponent.userRole = cleanUserRole;
-      }
-      if (cleanDealSize && fallback.opponent) {
-        fallback.opponent.stakes = cleanDealSize;
-      }
+      if (cleanUserRole && fallback.opponent) fallback.opponent.userRole = cleanUserRole;
+      if (cleanDealSize && fallback.opponent) fallback.opponent.stakes = cleanDealSize;
       fallback.opponent.difficulty = diff;
       res.json(fallback);
       return;
     }
 
-    let roleGuidance = '';
-    if (cat === 'GROUP_DISCUSSION') {
-      roleGuidance = `This is a GROUP DISCUSSION (GD) / DEBATE topic. The opponent MUST be an articulate rival debater or fellow panelist discussing the user's motion/thesis.`;
-    } else if (cat === 'INTERVIEW') {
-      roleGuidance = `This is an EXECUTIVE JOB INTERVIEW. The opponent MUST be a hiring interviewer or panel lead evaluating candidate fit.`;
-    } else if (cat === 'PITCHING') {
-      roleGuidance = `This is a VENTURE PITCH / INVESTOR DEFENSE. The opponent MUST be a venture capital investor or angel evaluating the startup.`;
-    } else if (cat === 'EVERYDAY_SKILLS') {
-      roleGuidance = `This is an EVERYDAY WORKPLACE OR LIFE NEGOTIATION. The opponent MUST be a real-world stakeholder (such as a landlord, boss, or recruiter).`;
-    } else {
-      roleGuidance = `This is a COMMERCIAL NEGOTIATION scenario. The opponent MUST be an executive buyer, CFO, or vendor.`;
-    }
+    const systemInstruction = `You are DealDebate, an expert opponent and debater.
 
-    let diffGuidance = '';
-    if (diff === 'EASY') {
-      diffGuidance = `DIFFICULTY: EASY (Practice Mode for Students).
-- Tone: Friendly, polite, supportive, and encouraging. Never rude or intimidating.
-- Vocabulary: Simple, accessible, everyday English.
-- Pushback: Formulate a simple, straightforward objection.
-- Attitude: Highly cooperative and willing to concede if the user makes even one clear logical point.
-- HINT REQUIREMENT: You MUST include "hint": a 1-sentence helpful suggestion advising the student on how they can respond to this opening objection.`;
-    } else if (diff === 'HARD') {
-      diffGuidance = `DIFFICULTY: HARD (Interview Prep / Executive Gauntlet).
-- Tone: Brutal, demanding, high-pressure, skeptical.
-- Vocabulary: Sophisticated, expert-level corporate and analytical vocabulary.
-- Pushback: Sharp, aggressive objections, pounce on any weak logic, attack unproven assumptions.
-- Attitude: Absolutely NO easy concessions.`;
-    } else {
-      diffGuidance = `DIFFICULTY: MEDIUM (Standard Business Simulation).
-- Tone: Professional, realistic, firm.
-- Vocabulary: Standard business English.
-- Pushback: Standard commercial pushback, evaluating balanced trade-offs.`;
-    }
+MANDATORY DIRECTIVE: 100% TOPIC FIDELITY IS STRICTLY ENFORCED.
+The user has provided this exact scenario / motion / debate topic:
+"${cleanScenario}"
 
-    const prompt = `You are an elite simulation engine for MBA and business students practicing communication.
+CRITICAL RULES:
+1. ABSOLUTE TOPIC LOYALTY:
+   - All arguments, persona traits, examples, domain facts, and objections MUST come directly from the subject matter of "${cleanScenario}" (e.g. sports, movies, college life, food, philosophy, technology, everyday situations, etc.).
+   - NEVER EVER DEFAULT TO GENERIC BUSINESS OR CORPORATE JARGON (such as CFO, enterprise software, IT capex, budget austerity, ROI, SLA, profit margins, procurement) UNLESS "${cleanScenario}" is explicitly and literally about corporate business, contracts, or procurement.
+2. TAILOR THE OPPONENT DIRECTLY TO THE SUBJECT MATTER:
+   - If SPORTS ("Formula 1 racing", "messi vs ronaldo", "NBA", "cricket"):
+     Opponent MUST be a specialized sports analyst, tactical debater, or race strategist. The opening line MUST cite authentic sports facts, stats, rules, or player comparisons on "${cleanScenario}".
+   - If MOVIES / CINEMA / POP CULTURE:
+     Opponent MUST be a film critic or cultural analyst debating narrative structure, cinematography, or character arcs.
+   - If COLLEGE / EDUCATION / ACADEMICS ("AI in colleges", "student life"):
+     Opponent MUST be an academic dean, professor, or student affairs debater debating learning integrity, essays, critical thinking, or student welfare.
+   - If FOOD / SCIENCE / PHILOSOPHY / EVERYDAY LIFE:
+     Opponent MUST be an authentic domain specialist or passionate contrary debater.
+   - If CORPORATE / BUSINESS (salary, contract negotiation, vendor):
+     Opponent should be an executive buyer, director, or hiring manager.
+3. DIFFICULTY BEHAVIOR (${diff}):
+   - EASY (FOR A TOTAL BEGINNER):
+     * Use very simple, everyday English.
+     * Keep arguments short and uncomplicated.
+     * Gentle opposition and easy rebuttals — like teaching someone their first debate!
+     * Encouraging, kind, and supportive tone.
+     * Provide a 1-sentence helpful coaching hint.
+   - MEDIUM (BALANCED):
+     * Natural, balanced arguments, medium difficulty and realistic pushback.
+   - HARD (ADVANCED & AGGRESSIVE):
+     * Sharp, aggressive, advanced vocabulary, strong counter-arguments.
+     * Dissect logic ruthlessly, expose factual gaps, demand rigorous empirical proof.
+4. BRANDING:
+   - "name": MUST ALWAYS be "DealDebate" (never use a personal human name).
+5. "openingLine": EXACTLY 2 to 3 sentences long. Jump straight into character and debate the exact topic "${cleanScenario}".`;
 
-CUSTOMIZED SESSION INPUTS:
-- CATEGORY: ${cat}
-- SCENARIO / MOTION: "${cleanScenario}"
-${cleanUserRole ? `- USER ROLE: "${cleanUserRole}"` : ''}
-${cleanRole ? `- OPPONENT / OTHER SIDE: "${cleanRole}"` : ''}
-${cleanDealSize ? `- STAKES / SPECIFIC NUMBERS / CONSTRAINTS: "${cleanDealSize}"` : ''}
+    const prompt = `TOPIC / MOTION: "${cleanScenario}"
+CATEGORY: ${cat}
+${cleanUserRole ? `USER ROLE: "${cleanUserRole}"` : ''}
+${cleanRole ? `REQUESTED OPPONENT ROLE: "${cleanRole}"` : ''}
+${cleanDealSize ? `STAKES / SPECIFICS: "${cleanDealSize}"` : ''}
+DIFFICULTY: ${diff}
 
-${roleGuidance}
-${diffGuidance}
+Generate the opponent profile and opening line. Remember: 100% topic fidelity to "${cleanScenario}", zero corporate buzzwords unless the topic is business.`;
 
-MANDATORY ADAPTATION RULES:
-1. "opponent": An opponent persona strictly matching these customized parameters:
-   - "name": MUST strictly be "DealDebate" (never use a human personal name like Priya, Rohit, etc.)
-   - "title": appropriate title reflecting "${cleanRole || 'Opponent'}"
-   - "company": realistic organization, property management firm, B-school panel, or venture fund
-   - "stance": their posture specifically addressing the user's role ("${cleanUserRole || 'advocate'}") and proposal
-   - "initialObjection": their primary concern or counter-thesis
-   - "scenarioType": "${cat}"
-   - "opponentTypeLabel": appropriate label (e.g. "Opposing Debater", "Executive Interviewer", "Skeptical Investor", "Reluctant Landlord", "Direct Boss", or "Hesitant CFO")
-   - "userRole": "${cleanUserRole}"
-   - "stakes": "${cleanDealSize}"
-   - "difficulty": "${diff}"
-
-2. "openingLine": The opening remark spoken by the opponent to kick off the interaction.
-   CRITICAL REQUIREMENTS:
-   - LENGTH: EXACTLY 2 to 3 sentences long.
-   - BRANDING & NAME RULE: You MUST NEVER introduce yourself with a human personal name (e.g., NEVER say "I am Priya", "My name is...", "Hello, I am Rohit"). Jump straight into the dialogue and objection in character.
-   - It MUST adapt directly to the user's role ("${cleanUserRole || 'candidate/advocate'}"), directly address the motion/scenario ("${cleanScenario}"), and ${cleanDealSize ? `explicitly address or incorporate the stakes/numbers ("${cleanDealSize}")` : 'raise a relevant consideration'}.
-   - Respect the difficulty level (${diff}): ${diff === 'EASY' ? 'friendly, simple English, gentle objection' : diff === 'HARD' ? 'brutal, aggressive pushback' : 'firm professional pushback'}.
-
-3. "hint": ${diff === 'EASY' ? 'A 1-sentence encouraging tip for the student on how to respond to this opening line.' : 'null or empty string.'}`;
-
-    const response = await ai.models.generateContent({
-      model: 'gemini-3.8-flash',
+    const rawText = await generateGeminiContent(ai, {
       contents: prompt,
       config: {
-        systemInstruction: 'You are an adversarial simulation engine for students. Return strictly valid JSON conforming to the schema.',
+        systemInstruction,
         responseMimeType: 'application/json',
         responseSchema: {
           type: Type.OBJECT,
@@ -785,10 +658,10 @@ MANDATORY ADAPTATION RULES:
               type: Type.OBJECT,
               properties: {
                 name: { type: Type.STRING },
-                title: { type: Type.STRING },
-                company: { type: Type.STRING },
-                stance: { type: Type.STRING },
-                initialObjection: { type: Type.STRING },
+                title: { type: Type.STRING, description: 'Domain-specific title matching the topic (e.g. F1 Technical Analyst, Football Critic, Academic Dean)' },
+                company: { type: Type.STRING, description: 'Domain-specific entity or forum matching the topic (e.g. F1 Technical Regulations Committee, European Football Digest, Academic Ethics Board)' },
+                stance: { type: Type.STRING, description: 'Opponent counter-stance strictly focused on this topic' },
+                initialObjection: { type: Type.STRING, description: 'Specific objection grounded strictly in the topic' },
                 scenarioType: { type: Type.STRING },
                 opponentTypeLabel: { type: Type.STRING },
                 userRole: { type: Type.STRING },
@@ -799,7 +672,7 @@ MANDATORY ADAPTATION RULES:
             },
             openingLine: {
               type: Type.STRING,
-              description: 'Opponent opening remark in 2-3 sentences.'
+              description: 'Opponent opening remark in 2-3 sentences strictly debating this topic.'
             },
             hint: {
               type: Type.STRING,
@@ -811,7 +684,7 @@ MANDATORY ADAPTATION RULES:
       }
     });
 
-    const parsed = extractJson<{ opponent: OpponentProfile; openingLine: string; hint?: string }>(response.text);
+    const parsed = extractJson<{ opponent: OpponentProfile; openingLine: string; hint?: string }>(rawText);
     if (parsed && parsed.opponent && parsed.openingLine) {
       if (!parsed.opponent.scenarioType) parsed.opponent.scenarioType = cat;
       parsed.opponent.name = 'DealDebate';
@@ -824,29 +697,21 @@ MANDATORY ADAPTATION RULES:
 
     console.warn('Failed to parse Gemini init response. Using fallback.');
     const fallback = generateFallbackPersona(cleanScenario, cleanRole, cleanDealSize, cat, diff);
-    if (cleanUserRole && fallback.opponent) {
-      fallback.opponent.userRole = cleanUserRole;
-    }
-    if (cleanDealSize && fallback.opponent) {
-      fallback.opponent.stakes = cleanDealSize;
-    }
+    if (cleanUserRole && fallback.opponent) fallback.opponent.userRole = cleanUserRole;
+    if (cleanDealSize && fallback.opponent) fallback.opponent.stakes = cleanDealSize;
     fallback.opponent.difficulty = diff;
     res.json(fallback);
   } catch (err: unknown) {
     console.error('Error during /api/negotiation/init call:', err);
     const fallback = generateFallbackPersona(cleanScenario, cleanRole, cleanDealSize, cat, diff);
-    if (cleanUserRole && fallback.opponent) {
-      fallback.opponent.userRole = cleanUserRole;
-    }
-    if (cleanDealSize && fallback.opponent) {
-      fallback.opponent.stakes = cleanDealSize;
-    }
+    if (cleanUserRole && fallback.opponent) fallback.opponent.userRole = cleanUserRole;
+    if (cleanDealSize && fallback.opponent) fallback.opponent.stakes = cleanDealSize;
     fallback.opponent.difficulty = diff;
     res.json(fallback);
   }
 });
 
-// 2. Negotiation / Debate Round Reply
+// 2. Simulation Round Reply (Strict Topic Fidelity)
 app.post('/api/negotiation/reply', async (req: Request, res: Response) => {
   const { scenario, opponent, history, currentRound, userMessage, category, difficulty } = req.body;
   if (!userMessage || typeof userMessage !== 'string') {
@@ -863,66 +728,72 @@ app.post('/api/negotiation/reply', async (req: Request, res: Response) => {
     const ai = getAiClient();
     if (!ai) {
       console.warn('GEMINI_API_KEY not configured. Serving realistic fallback turn.');
-      res.json(generateFallbackTurn(roundNum, userMessage, opponent?.name || 'Opponent', isFinalRound, cat, diff));
+      res.json(generateFallbackTurn(roundNum, userMessage, opponent?.title || 'Debater', isFinalRound, scenario, diff));
       return;
     }
 
     const transcriptContext = (history as ChatTurn[] || [])
-      .map((t) => `${t.role === 'user' ? 'STUDENT' : (opponent?.name || 'OPPONENT').toUpperCase()}: ${t.content}`)
+      .map((t) => `${t.role === 'user' ? 'STUDENT' : 'DEALDEBATE'}: ${t.content}`)
       .join('\n');
 
     let dynamicRules = '';
     if (diff === 'EASY') {
-      dynamicRules = `DIFFICULTY: EASY (Practice Mode for Students).
-- Tone: Friendly, encouraging, polite, collaborative. Use clear, easy conversational English.
-- Concessions: Never interrupt. If the student makes even ONE clear logical point, CONCEDE and agree warmly!
-- By Round 3 or later: Enthusiastically concede the deal/debate! Praise their logic and accept their proposal (e.g. "That's a very fair point, and I appreciate how simply you explained it. I agree, let's move forward!").
-- Hint: You MUST provide "hint": a 1-sentence practical suggestion advising the student on how to answer your response.`;
+      dynamicRules = `DIFFICULTY: EASY (FOR A TOTAL BEGINNER).
+- Target audience: Total beginner debater. Teach them their first debate!
+- Language: VERY SIMPLE everyday English. Avoid complex jargon.
+- Arguments: Short arguments (1-2 sentences), gentle opposition, easy rebuttals that are easy to answer.
+- Tone: Encouraging, kind, warm, friendly.
+- Concessions: If the student gives any reasonable everyday point on "${scenario}", concede warmly! Praise their point and validate their thought.
+- Hint: You MUST provide "hint": a very simple, encouraging 1-sentence tip showing the student how to respond easily.`;
     } else if (diff === 'HARD') {
-      dynamicRules = `DIFFICULTY: HARD (Interview Prep / Executive Gauntlet).
-- Tone: Brutal, demanding, aggressive, high-pressure.
-- Vocabulary: Expert-level vocabulary and terminology.
-- Objections: Dissect weak logic, interrupt poor reasoning, point out fallacies, demand rigorous proof.
-- Concessions: Absolutely NO easy concessions. Make them fight for every inch.`;
+      dynamicRules = `DIFFICULTY: HARD (HIGH-STAKES / ADVANCED DEBATE).
+- Tone: Sharp, aggressive, uncompromising, high pressure.
+- Vocabulary: Advanced, sophisticated vocabulary and domain terminology specific to "${scenario}".
+- Counter-arguments: Fierce counter-arguments. Dissect weak premises, expose contradictions, point out fallacies, demand rigorous empirical verification.
+- Concessions: Zero easy concessions. Challenge every assumption on this topic.
+- Hint: Set hint to null.`;
     } else {
-      dynamicRules = `DIFFICULTY: MEDIUM (Standard Business Simulation).
-- Tone: Professional, firm, realistic pushback. Requires balanced trade-offs.`;
+      dynamicRules = `DIFFICULTY: MEDIUM (MODERATE & BALANCED).
+- Tone: Balanced, natural, professional debate.
+- Arguments: Medium difficulty arguments, realistic pushback, balanced counter-points and trade-offs directly related to "${scenario}".`;
     }
 
-    const prompt = `SCENARIO: ${scenario}
+    const systemInstruction = `You are DealDebate, an expert opponent debating "${scenario}".
+
+ABSOLUTE MANDATORY DIRECTIVE: 100% TOPIC FIDELITY IS STRICTLY ENFORCED.
+- You are debating: "${scenario}".
+- ALL your arguments, counter-arguments, examples, analogies, and objections MUST come directly from the subject matter of "${scenario}" (e.g. sports, cinema, academic policy, everyday skills, etc.).
+- NEVER default to generic corporate or business buzzwords (such as ROI, SLA, profit margins, enterprise distribution, budget cuts, software proposals) unless the topic itself is business.
+- Stay 100% in character as DealDebate (${opponent?.title || 'Counterpart'}). Never use any human personal name.
+- LENGTH: EXACTLY 2 to 4 sentences long.
+- ${dynamicRules}`;
+
+    const prompt = `SCENARIO / TOPIC: "${scenario}"
 CATEGORY: ${cat}
 DIFFICULTY: ${diff}
-OPPONENT: ${opponent?.name || 'Opponent'} (${opponent?.title || 'Decision Maker'} at ${opponent?.company || 'Company'})
-STANCE: ${opponent?.stance || 'Counterpart'}
-PROGRESS: Round ${roundNum} of 6. ${isFinalRound ? 'THIS IS THE FINAL 6TH ROUND. Provide your concluding response.' : ''}
+OPPONENT: DealDebate (${opponent?.title || 'Counterpart'} at ${opponent?.company || 'Organization'})
+OPPONENT STANCE: ${opponent?.stance || 'Counter-perspective'}
+PROGRESS: Round ${roundNum} of 6. ${isFinalRound ? 'THIS IS THE FINAL 6TH ROUND. Provide your concluding argument on this topic.' : ''}
 
 TRANSCRIPT SO FAR:
 ${transcriptContext}
 
-LATEST STUDENT STATEMENT:
+LATEST STATEMENT FROM STUDENT:
 "${userMessage}"
 
-RULES:
-1. Stay 100% in character as DealDebate in the role of ${opponent?.title || 'the counterpart'}.
-2. LENGTH REQUIREMENT: You MUST reply in EXACTLY 2 to 4 sentences.
-3. BRANDING & NAME RULE: You MUST NEVER use, mention, or introduce yourself with any human personal name (such as Priya, Rohit, David, etc.).
-4. ${dynamicRules}
-5. ${isFinalRound ? 'Deliver your final verdict/conclusion on the debate/interview/deal. Keep to 2-4 sentences.' : 'Deliver your response.'}
-6. ${diff === 'EASY' ? 'Provide a helpful 1-sentence "hint" for the student on how to respond.' : 'Set "hint" to null.'}
-7. Do NOT break character or offer AI coaching in the dialogue itself.`;
+Respond in 2 to 4 sentences directly addressing their point on "${scenario}". ${diff === 'EASY' ? 'Include a 1-sentence coaching hint.' : 'Set hint to null.'}`;
 
-    const response = await ai.models.generateContent({
-      model: 'gemini-3.8-flash',
+    const rawText = await generateGeminiContent(ai, {
       contents: prompt,
       config: {
-        systemInstruction: 'You are an opponent in a student simulation. Return strictly valid JSON.',
+        systemInstruction,
         responseMimeType: 'application/json',
         responseSchema: {
           type: Type.OBJECT,
           properties: {
             reply: {
               type: Type.STRING,
-              description: 'Opponent dialogue strictly in 2 to 4 sentences.'
+              description: 'Opponent dialogue strictly in 2 to 4 sentences about this topic.'
             },
             sentiment: {
               type: Type.STRING,
@@ -942,101 +813,136 @@ RULES:
       }
     });
 
-    const parsed = extractJson<{ reply: string; sentiment: string; currentFocus: string; hint?: string }>(response.text);
+    const parsed = extractJson<{ reply: string; sentiment: string; currentFocus: string; hint?: string }>(rawText);
     if (parsed && parsed.reply) {
       res.json(parsed);
       return;
     }
 
-    res.json(generateFallbackTurn(roundNum, userMessage, opponent?.name || 'Opponent', isFinalRound, cat, diff));
+    res.json(generateFallbackTurn(roundNum, userMessage, opponent?.title || 'Debater', isFinalRound, scenario, diff));
   } catch (err: unknown) {
     console.error('Error during /api/negotiation/reply:', err);
-    res.json(generateFallbackTurn(roundNum, userMessage, opponent?.name || 'Opponent', isFinalRound, cat, diff));
+    res.json(generateFallbackTurn(roundNum, userMessage, opponent?.title || 'Debater', isFinalRound, scenario, diff));
   }
 });
 
-// 3. Generate Report Card after 6 Rounds
+// 3. Generate Report Card after 6 Rounds (Dramatically Clearer & High-Impact)
 app.post('/api/negotiation/evaluate', async (req: Request, res: Response) => {
-  const { scenario, opponent, history, category } = req.body;
+  const { scenario, opponent, history, category, difficulty } = req.body;
   if (!history || !Array.isArray(history) || history.length === 0) {
     res.status(400).json({ error: 'Valid negotiation history is required' });
     return;
   }
 
   const cat: ScenarioCategory = category || opponent?.scenarioType || inferCategory(scenario);
+  const diff: DifficultyLevel = difficulty === 'HARD' ? 'HARD' : difficulty === 'MEDIUM' ? 'MEDIUM' : (opponent?.difficulty || 'EASY');
 
   try {
     const ai = getAiClient();
     if (!ai) {
       console.warn('GEMINI_API_KEY not configured. Generating detailed fallback report.');
-      res.json(generateFallbackReport(scenario, opponent, history, cat));
+      res.json(generateFallbackReport(scenario, opponent, history, cat, diff));
       return;
     }
 
     const transcript = (history as ChatTurn[])
-      .map((t, i) => `[Turn ${i + 1} - ${t.role === 'user' ? 'STUDENT' : 'OPPONENT'} (Round ${t.round || Math.ceil((i + 1) / 2)})]:\n"${t.content}"`)
+      .map((t, i) => `[Turn ${i + 1} - ${t.role === 'user' ? 'STUDENT' : 'DEALDEBATE'} (Round ${t.round || Math.ceil((i + 1) / 2)})]:\n"${t.content}"`)
       .join('\n\n');
 
-    let coachingContext = '';
-    if (cat === 'GROUP_DISCUSSION') {
-      coachingContext = `This was a GROUP DISCUSSION debate. Evaluate how well the student articulated logical arguments, defended premises against the rival debater, acknowledged nuance, and synthesized conclusions.`;
-    } else if (cat === 'INTERVIEW') {
-      coachingContext = `This was an EXECUTIVE JOB INTERVIEW. Evaluate how well the student framed achievements, handled drill-down scrutiny from the interviewer, demonstrated depth, and closed with authority.`;
-    } else if (cat === 'PITCHING') {
-      coachingContext = `This was a VENTURE CAPITAL PITCH. Evaluate how well the student presented traction, defended unit economics and moats, handled investor skepticism, and maintained investor interest.`;
-    } else if (cat === 'EVERYDAY_SKILLS') {
-      coachingContext = `This was a REAL-WORLD WORKPLACE / LIFE NEGOTIATION. Evaluate clarity, assertiveness, emotional regulation, boundary setting, and constructive problem-solving.`;
+    let evalToneGuidance = '';
+    if (diff === 'EASY') {
+      evalToneGuidance = `DIFFICULTY: EASY (FOR A TOTAL BEGINNER).
+- The student is a complete beginner doing their very first debate.
+- Tone MUST be exceptionally KIND, SIMPLE, and ENCOURAGING.
+- Use plain, friendly everyday English (no dense academic or debate jargon).
+- Celebrate their effort, highlight what they did right warmly, and keep constructive critiques very gentle and simple to understand.`;
+    } else if (diff === 'HARD') {
+      evalToneGuidance = `DIFFICULTY: HARD (HIGH-STAKES / ADVANCED DEBATE).
+- Rigorous, elite executive standards.
+- Tone should be sharp, uncompromising, and analytical.
+- Evaluate rhetorical precision, statistical support, logical fallacies, and rebuttal speed.`;
     } else {
-      coachingContext = `This was a COMMERCIAL NEGOTIATION. Evaluate value framing, price defense, reciprocal concessions, and closing momentum against the CFO/executive buyer.`;
+      evalToneGuidance = `DIFFICULTY: MEDIUM (MODERATE & BALANCED).
+- Balanced, objective, constructive feedback suitable for general debate skill improvement.`;
     }
 
-    const prompt = `You are a world-class executive communication and negotiation professor evaluating a student's 6-round performance.
+    const systemInstruction = `You are an expert executive communication and debate judge analyzing a student's 6-round simulation on "${scenario}".
+${evalToneGuidance}
+Quote the student verbatim from the transcript for all strengths and improvements. Return strictly valid JSON matching the schema.`;
 
-SCENARIO: "${scenario}"
-CATEGORY: ${cat}
-OPPONENT: ${opponent?.name} (${opponent?.title} at ${opponent?.company})
-${coachingContext}
+    const prompt = `TOPIC: "${scenario}"
+DIFFICULTY: ${diff}
+OPPONENT: DealDebate (${opponent?.title || 'Counterpart'})
 
-FULL 6-ROUND TRANSCRIPT:
+TRANSCRIPT:
 ${transcript}
 
-EVALUATION CRITERIA (MANDATORY REQUIREMENTS):
-1. Scores out of 10 for each of these 4 pillars:
-   - "persuasion": Framing, clarity of value/thesis, logical conviction.
-   - "handlingObjections": Rebutting counter-arguments, answering tough interview drills, or defusing pushbacks.
-   - "concessions": Holding the line, trading reciprocal concessions, acknowledging nuance without losing leverage.
-   - "closing": Synthesis, conviction in final statements, driving to a clear decision or agreement.
-   MANDATORY REQUIREMENT FOR EVERY PILLAR REASON:
-   Each pillar's "reason" MUST QUOTE what the student actually said in quotes (e.g. When you argued "..." you demonstrated...). Be analytical, objective, and constructive.
+EVALUATION REQUIREMENTS (ALL FIELDS MANDATORY - TAILORED TO ${diff} DIFFICULTY):
+1. "overallScore": Number from 1.0 to 10.0 (e.g. 8.4) evaluating overall debate effectiveness, logic, and poise.
+2. "overallGrade": Letter grade string (e.g. "A+", "A", "A-", "B+", "B", "C+").
+3. "winner": EXACTLY one of: "USER", "OPPONENT", "DRAW".
+4. "verdict": EXACTLY ONE PUNCHY SENTENCE declaring who won the debate and why, specifically mentioning the topic "${scenario}" and the decisive argument.
+   Examples:
+   - "Victory for Student: Consistently out-maneuvered DealDebate by grounding Ronaldo's clutch Champions League knockout statistics while neutralizing the playmaking critique."
+   - "Victory for DealDebate: Exposed key contradictions in the student's tire management argument and maintained superior empirical leverage on aerodynamic dominance."
+   - "Balanced Draw: Both sides traded compelling arguments on AI college policies with equal substantiation and zero unearned concessions."
+5. "dealOutcome": 3-6 word summary (e.g. "Debate Won: Persuasive Argument Sustained", "Resolution Reached with Key Concessions").
+6. "executiveSummary": 2 concise sentences summarizing performance on "${scenario}".
+7. "strengths": EXACTLY 3 SPECIFIC STRENGTHS.
+   For each item provide:
+   - "title": 2-5 words punchy label (e.g. "Mastery of Historical Records", "Tactical Pivot under Pressure", "High-Impact Closing Defense")
+   - "quote": QUOTE what the student actually said verbatim from the transcript!
+   - "explanation": 1-2 clear sentences explaining why this moment was effective in the debate.
+8. "improvements": EXACTLY 3 CONCRETE IMPROVEMENTS.
+   For each item provide:
+   - "title": 2-5 words punchy label (e.g. "Unnecessary Concession on Consistency", "Vague Generalization in Round 2", "Passive Closing Call")
+   - "quote": QUOTE what the student actually said verbatim from the transcript where they showed weakness or hesitation!
+   - "critique": 1 concise sentence explaining the specific deficit.
+   - "rewrite": A concrete executive rewrite of what they SHOULD HAVE said instead!
+9. 4 Competency scores (out of 10) with quoted evidence: "persuasion", "handlingObjections", "concessions", "closing".
+10. "topTip": 1 actionable strategic directive for subsequent debates on this topic.`;
 
-2. The student's 2 WEAKEST LINES rewritten better:
-   - Identify the 2 single weakest statements the student uttered.
-   - Quote their exact words in "original".
-   - In "critique", explain why it compromised their authority, leverage, or logic.
-   - In "rewrite", provide the polished executive rephrase.
-
-3. 1 TOP TIP:
-   - Exactly ONE high-leverage strategic insight tailored specifically to their habits in this scenario.
-
-4. OVERALL OUTCOME & GRADE:
-   - "dealOutcome": Realistic outcome (e.g., "Term sheet signed at ₹46L", "GD Panel Consensus Reached", "Shortlisted for Final Partner Interview", "Landlord Agreed to Maintenance Schedule").
-   - "overallScore": 1.0 to 10.0 score.
-   - "overallGrade": e.g., A, A-, B+, B, C+.
-   - "executiveSummary": 2-3 sentence overview.`;
-
-    const response = await ai.models.generateContent({
-      model: 'gemini-3.8-flash',
+    const rawText = await generateGeminiContent(ai, {
       contents: prompt,
       config: {
-        systemInstruction: 'You are an executive communications evaluator. Quote the student verbatim and return strictly valid JSON matching the schema.',
+        systemInstruction,
         responseMimeType: 'application/json',
         responseSchema: {
           type: Type.OBJECT,
           properties: {
             overallScore: { type: Type.NUMBER },
             overallGrade: { type: Type.STRING },
+            winner: { type: Type.STRING, description: 'One of: USER, OPPONENT, DRAW' },
+            verdict: { type: Type.STRING, description: 'One punchy sentence on who won and why.' },
             dealOutcome: { type: Type.STRING },
             executiveSummary: { type: Type.STRING },
+            strengths: {
+              type: Type.ARRAY,
+              items: {
+                type: Type.OBJECT,
+                properties: {
+                  title: { type: Type.STRING },
+                  quote: { type: Type.STRING, description: 'Exact verbatim quote of student.' },
+                  explanation: { type: Type.STRING }
+                },
+                required: ['title', 'quote', 'explanation']
+              },
+              description: 'Exactly 3 specific strengths with quoted moments.'
+            },
+            improvements: {
+              type: Type.ARRAY,
+              items: {
+                type: Type.OBJECT,
+                properties: {
+                  title: { type: Type.STRING },
+                  quote: { type: Type.STRING, description: 'Exact verbatim quote of student.' },
+                  critique: { type: Type.STRING },
+                  rewrite: { type: Type.STRING, description: 'Rewritten example of what they could have said.' }
+                },
+                required: ['title', 'quote', 'critique', 'rewrite']
+              },
+              description: 'Exactly 3 concrete improvements with rewritten examples.'
+            },
             persuasion: {
               type: Type.OBJECT,
               properties: {
@@ -1069,38 +975,36 @@ EVALUATION CRITERIA (MANDATORY REQUIREMENTS):
               },
               required: ['score', 'reason']
             },
-            weakestLines: {
-              type: Type.ARRAY,
-              items: {
-                type: Type.OBJECT,
-                properties: {
-                  original: { type: Type.STRING },
-                  critique: { type: Type.STRING },
-                  rewrite: { type: Type.STRING }
-                },
-                required: ['original', 'critique', 'rewrite']
-              }
-            },
             topTip: { type: Type.STRING }
           },
           required: [
             'overallScore',
             'overallGrade',
+            'verdict',
             'dealOutcome',
             'executiveSummary',
+            'strengths',
+            'improvements',
             'persuasion',
             'handlingObjections',
             'concessions',
             'closing',
-            'weakestLines',
             'topTip'
           ]
         }
       }
     });
 
-    const parsed = extractJson<any>(response.text);
-    if (parsed && parsed.overallScore && parsed.persuasion && parsed.weakestLines) {
+    const parsed = extractJson<any>(rawText);
+    if (parsed && parsed.overallScore && parsed.verdict && parsed.strengths && parsed.improvements) {
+      // Ensure backwards compatibility with weakestLines
+      if (!parsed.weakestLines) {
+        parsed.weakestLines = parsed.improvements.map((imp: any) => ({
+          original: imp.quote,
+          critique: imp.critique,
+          rewrite: imp.rewrite
+        }));
+      }
       res.json(parsed);
       return;
     }

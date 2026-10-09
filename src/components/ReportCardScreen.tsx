@@ -2,7 +2,9 @@ import React, { useState } from 'react';
 import { 
   ReportCard, 
   OpponentProfile, 
-  ChatMessage 
+  ChatMessage,
+  StrengthItem,
+  ImprovementItem
 } from '../types';
 import { 
   ArrowLeft, 
@@ -15,7 +17,11 @@ import {
   FileText,
   AlertTriangle,
   Lightbulb,
-  History
+  History,
+  Trophy,
+  CheckCircle2,
+  Sparkles,
+  ArrowRight
 } from 'lucide-react';
 
 interface ReportCardScreenProps {
@@ -42,34 +48,101 @@ export const ReportCardScreen: React.FC<ReportCardScreenProps> = ({
   const [copied, setCopied] = useState(false);
   const [showTranscript, setShowTranscript] = useState(false);
 
+  // Fallbacks for strengths & improvements to handle legacy sessionStorage records
+  const userMessages = messages.filter(m => m.role === 'user').map(m => m.content);
+  const fallbackSample1 = userMessages[0] || 'My opening position on this topic.';
+  const fallbackSample2 = userMessages[1] || userMessages[0] || 'My second point defending my stance.';
+  const fallbackSampleLast = userMessages[userMessages.length - 1] || 'My concluding remarks on this motion.';
+
+  const displayStrengths: StrengthItem[] = report.strengths && report.strengths.length > 0
+    ? report.strengths
+    : [
+        {
+          title: 'Direct Thematic Framing',
+          quote: fallbackSample1.slice(0, 90) + '...',
+          explanation: report.persuasion?.reason || 'Established clear logical conviction from the opening round.'
+        },
+        {
+          title: 'Resilience under Counter-Arguments',
+          quote: fallbackSample2.slice(0, 90) + '...',
+          explanation: report.handlingObjections?.reason || 'Absorbed the opponent’s skepticism directly and reframed the discussion.'
+        },
+        {
+          title: 'Composed Final Synthesis',
+          quote: fallbackSampleLast.slice(0, 90) + '...',
+          explanation: report.closing?.reason || 'Delivered a coherent closing argument that reinforced your primary differentiators.'
+        }
+      ];
+
+  const displayImprovements: ImprovementItem[] = report.improvements && report.improvements.length > 0
+    ? report.improvements
+    : (report.weakestLines || []).map((w, i) => ({
+        title: i === 0 ? 'Defensive Concession' : i === 1 ? 'Under-Substantiated Claim' : 'Hesitant Closing Stance',
+        quote: w.original,
+        critique: w.critique,
+        rewrite: w.rewrite
+      }));
+
+  // Ensure at least 3 improvements exist
+  if (displayImprovements.length < 3) {
+    displayImprovements.push({
+      title: 'Hesitant Phrasing in Mid-Rounds',
+      quote: fallbackSample2.slice(0, 75) + '...',
+      critique: 'Using tentative language like "I think" or "possibly" reduces argument authority under pressure.',
+      rewrite: 'The empirical track record on this topic is definitive: the comparative evidence consistently demonstrates this outcome.'
+    });
+  }
+
+  // Clean quotes helper to avoid awkward double quotation marks
+  const cleanQuote = (q?: string) => {
+    if (!q) return '';
+    return q.replace(/^["'“”]+|["'“”]+$/g, '').trim();
+  };
+
+  const verdictText = report.verdict || `Debate Evaluation: ${report.dealOutcome}. Score ${report.overallScore}/10.`;
+  const cleanVerdict = cleanQuote(verdictText);
+  const isUserWin = report.winner === 'USER' || cleanVerdict.toLowerCase().includes('victory for user') || cleanVerdict.toLowerCase().includes('victory for student');
+  const isOpponentWin = report.winner === 'OPPONENT' || cleanVerdict.toLowerCase().includes('victory for dealdebate') || cleanVerdict.toLowerCase().includes('victory for opponent');
+  const winner = isUserWin ? 'USER' : isOpponentWin ? 'OPPONENT' : (report.winner || (report.overallScore >= 7.5 ? 'USER' : 'OPPONENT'));
+
   const copyToClipboard = () => {
-    const text = `# EXECUTIVE PERFORMANCE EVALUATION SHEET
-Scenario: ${scenario}
-Format: ${opponent.scenarioType || 'Negotiation'}
-Opponent: DealDebate (${opponent.title} at ${opponent.company})
-Outcome: ${report.dealOutcome}
-Composite Score: ${report.overallScore}/10 (Grade: ${report.overallGrade})
+    const text = `# PERFORMANCE EVALUATION RECORD: DEALDEBATE
+Topic: ${scenario}
+Format: ${opponent.scenarioType || 'Debate'}
+Counterpart: DealDebate (${opponent.title} at ${opponent.company})
+Score: ${report.overallScore}/10 (Grade: ${report.overallGrade})
+Winner: ${winner === 'USER' ? 'User' : winner === 'OPPONENT' ? 'DealDebate' : 'Draw'}
 
-## Executive Summary
-${report.executiveSummary}
+## Verdict
+${verdictText}
 
-## Formal Scorecard (Out of 10)
-- Persuasion (${report.persuasion.score}/10): ${report.persuasion.reason}
-- Handling Objections (${report.handlingObjections.score}/10): ${report.handlingObjections.reason}
-- Concessions (${report.concessions.score}/10): ${report.concessions.reason}
-- Closing (${report.closing.score}/10): ${report.closing.reason}
-
-## Weakest Statements & Executive Rewrites
-${report.weakestLines
+## 3 Key Strengths (With Quoted Moments)
+${displayStrengths
   .map(
-    (w, i) => `### Statement #${i + 1}
-- What You Said: "${w.original}"
-- Diagnostic Critique: ${w.critique}
-- Executive Rephrase: "${w.rewrite}"`
+    (s, i) => `### ${i + 1}. ${s.title}
+- What You Said: "${s.quote}"
+- Impact: ${s.explanation}`
   )
   .join('\n\n')}
 
-## Key Strategic Directive
+## 3 Concrete Improvements (With Rewritten Examples)
+${displayImprovements
+  .slice(0, 3)
+  .map(
+    (imp, i) => `### ${i + 1}. ${imp.title}
+- What You Said: "${imp.quote}"
+- Deficit: ${imp.critique}
+- Rewritten Example: "${imp.rewrite}"`
+  )
+  .join('\n\n')}
+
+## Core Competency Scores (Out of 10)
+- Persuasion: ${report.persuasion.score}/10 — ${report.persuasion.reason}
+- Handling Objections: ${report.handlingObjections.score}/10 — ${report.handlingObjections.reason}
+- Concessions: ${report.concessions.score}/10 — ${report.concessions.reason}
+- Closing: ${report.closing.score}/10 — ${report.closing.reason}
+
+## Strategic Directive
 ${report.topTip}
 `;
 
@@ -82,59 +155,11 @@ ${report.topTip}
     window.print();
   };
 
-  const isGD = opponent.scenarioType === 'GROUP_DISCUSSION';
-  const isInterview = opponent.scenarioType === 'INTERVIEW';
-  const isPitch = opponent.scenarioType === 'PITCHING';
-
   const pillars = [
-    {
-      name: 'Persuasion',
-      score: report.persuasion.score,
-      definition: isGD
-        ? 'Logical coherence, framing, and empirical data substantiation'
-        : isInterview
-        ? 'Value proposition framing, executive presence, and storytelling'
-        : isPitch
-        ? 'Market problem urgency, distribution clarity, and unit economics'
-        : 'Value framing, commercial leverage, and ROI justification',
-      evidence: report.persuasion.reason
-    },
-    {
-      name: 'Handling Objections',
-      score: report.handlingObjections.score,
-      definition: isGD
-        ? 'Rebutting counter-arguments, refuting fallacies, and poise'
-        : isInterview
-        ? 'Handling drill-downs, operational depth, and transparency'
-        : isPitch
-        ? 'Answering investor skepticism regarding moats and competition'
-        : 'Neutralizing doubts, maintaining composure, and defusing price pushbacks',
-      evidence: report.handlingObjections.reason
-    },
-    {
-      name: 'Concessions',
-      score: report.concessions.score,
-      definition: isGD
-        ? 'Recognizing trade-offs without abandoning central premise'
-        : isInterview
-        ? 'Intellectual honesty regarding weaknesses without surrendering authority'
-        : isPitch
-        ? 'Pragmatism regarding capital allocation while defending equity'
-        : 'Protecting margins, trading reciprocally, and avoiding unearned giveaways',
-      evidence: report.concessions.reason
-    },
-    {
-      name: 'Closing',
-      score: report.closing.score,
-      definition: isGD
-        ? 'Synthesizing discussion and delivering memorable conclusion'
-        : isInterview
-        ? 'Final value pitch, demonstrating fit, and securing next steps'
-        : isPitch
-        ? 'Creating investor urgency and calling for term sheet review'
-        : 'Deal momentum, trial closes, and securing binding next steps',
-      evidence: report.closing.reason
-    }
+    { name: 'Persuasion', score: report.persuasion.score, reason: report.persuasion.reason },
+    { name: 'Handling Objections', score: report.handlingObjections.score, reason: report.handlingObjections.reason },
+    { name: 'Concessions', score: report.concessions.score, reason: report.concessions.reason },
+    { name: 'Closing', score: report.closing.score, reason: report.closing.reason },
   ];
 
   return (
@@ -201,161 +226,171 @@ ${report.topTip}
           </div>
         </div>
 
-        {/* The Formal Evaluation Sheet (Luxury Editorial Monograph Style) */}
-        <div className="bg-white border border-[#111111] rounded-none p-8 sm:p-12 space-y-10 shadow-none">
+        {/* The Clean, Impressive Results Sheet (Luxury Black-and-White Editorial) */}
+        <div className="bg-white border border-[#111111] rounded-none p-6 sm:p-10 space-y-9 shadow-none">
           
-          {/* Document Header */}
-          <div className="border-b border-[#111111] pb-8">
-            <div className="flex flex-col sm:flex-row sm:items-start justify-between gap-6">
-              <div>
-                <span className="text-[10px] uppercase tracking-widest text-neutral-400 font-medium">
-                  Evaluation Record · Archival Transcript
-                </span>
-                <h1 className="text-3xl sm:text-4xl font-serif font-normal text-[#111111] tracking-tight mt-1.5">
-                  Executive Communication Assessment
+          {/* 1. Header & Big Overall Scorecard Bar */}
+          <div className="border-b border-[#111111] pb-7 space-y-6">
+            <div className="flex flex-col md:flex-row md:items-start justify-between gap-6">
+              
+              <div className="space-y-2 flex-1">
+                <div className="flex items-center gap-2">
+                  <span className="text-[10px] uppercase tracking-widest text-neutral-500 font-semibold border border-[#e5e5e5] px-2 py-0.5 bg-neutral-50">
+                    {opponent.scenarioType || 'Simulation'}
+                  </span>
+                  <span className="text-[10px] uppercase tracking-widest text-neutral-400 font-mono">
+                    6-Round Evaluation
+                  </span>
+                </div>
+
+                <h1 className="text-2xl sm:text-3xl lg:text-4xl font-serif font-normal text-[#111111] tracking-tight leading-tight">
+                  {scenario}
                 </h1>
-                <p className="text-xs text-neutral-600 mt-1.5 font-sans">
-                  Session audit across 6 interactive debate rounds against specialized AI counterpart
-                </p>
+
+                <div className="text-xs text-neutral-600 font-sans flex flex-wrap items-center gap-2 pt-1">
+                  <span>Opponent: <strong className="text-[#111111] font-medium">DealDebate</strong> ({opponent.title})</span>
+                  <span>·</span>
+                  <span>Difficulty: <strong className="text-[#111111] font-mono text-[11px] uppercase">{opponent.difficulty || 'EASY'}</strong></span>
+                  {opponent.stakes && (
+                    <>
+                      <span>·</span>
+                      <span className="font-mono text-neutral-700 bg-neutral-50 px-1.5 py-0.5 border border-[#e5e5e5]">Stakes: {opponent.stakes}</span>
+                    </>
+                  )}
+                </div>
               </div>
 
-              {/* Composite Grade Stamp */}
-              <div className="border border-[#111111] rounded-none p-4 text-center sm:text-right bg-white shrink-0 min-w-[140px]">
-                <div className="text-[10px] uppercase tracking-widest text-neutral-400 font-medium">
-                  Composite Score
+              {/* Big Overall Score Display */}
+              <div className="border border-[#111111] p-5 text-center bg-neutral-50 shrink-0 min-w-[160px] self-start md:self-auto">
+                <div className="text-[10px] uppercase tracking-widest text-neutral-500 font-semibold">
+                  Overall Score
                 </div>
-                <div className="text-3xl font-serif text-[#111111] font-normal my-0.5">
-                  {report.overallScore} <span className="text-xs text-neutral-500 font-sans font-normal">/ 10</span>
+                <div className="text-4xl sm:text-5xl font-serif text-[#111111] font-normal my-1">
+                  {report.overallScore} <span className="text-sm text-neutral-500 font-sans font-normal">/ 10</span>
                 </div>
-                <div className="text-xs uppercase tracking-wider font-sans font-semibold text-[#111111]">
+                <div className="inline-block border border-[#111111] px-2.5 py-0.5 text-xs uppercase tracking-wider font-semibold font-mono bg-white text-[#111111]">
                   Grade: {report.overallGrade}
                 </div>
               </div>
+
             </div>
 
-            {/* Assessment Metadata Grid */}
-            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 mt-8 pt-5 border-t border-[#e5e5e5] text-xs">
-              <div>
-                <span className="text-neutral-400 block text-[10px] uppercase tracking-widest">Scenario / Motion:</span>
-                <span className="font-medium text-[#111111] truncate block mt-0.5">{scenario}</span>
-                {opponent.userRole && (
-                  <span className="text-[11px] text-neutral-500 block truncate">Role: {opponent.userRole}</span>
-                )}
-              </div>
-              <div>
-                <span className="text-neutral-400 block text-[10px] uppercase tracking-widest">Counterpart:</span>
-                <span className="font-medium text-[#111111] block mt-0.5">DealDebate</span>
-                <span className="text-[11px] text-neutral-500 block truncate">{opponent.title}</span>
-              </div>
-              <div>
-                <span className="text-neutral-400 block text-[10px] uppercase tracking-widest">Format / Tier:</span>
-                <span className="font-medium text-[#111111] block mt-0.5">
-                  {opponent.scenarioType === 'GROUP_DISCUSSION' ? 'Group Discussion' :
-                   opponent.scenarioType === 'INTERVIEW' ? 'Executive Interview' :
-                   opponent.scenarioType === 'PITCHING' ? 'Venture Pitch' :
-                   opponent.scenarioType === 'EVERYDAY_SKILLS' ? 'Everyday Workplace' : 'Commercial Deal'}
+            {/* 2. One-Line Verdict Banner (Clear & High-Impact) */}
+            <div className="border border-[#111111] p-4 sm:p-5 bg-neutral-50 text-[#111111]">
+              <div className="flex flex-col sm:flex-row sm:items-baseline justify-between gap-2 mb-1.5">
+                <span className="text-[10px] font-bold uppercase tracking-widest text-neutral-500">
+                  Official Simulation Verdict
                 </span>
-                <span className="text-[11px] text-neutral-500 block truncate">
-                  Difficulty: {opponent.difficulty === 'EASY' ? 'Easy (Practice)' : opponent.difficulty === 'HARD' ? 'Hard (Interview)' : 'Medium'}
+                <span className={`text-[10px] font-mono uppercase tracking-wider px-2 py-0.5 border font-semibold ${
+                  winner === 'USER' 
+                    ? 'bg-[#111111] text-white border-[#111111]' 
+                    : winner === 'OPPONENT' 
+                    ? 'bg-neutral-200 text-[#111111] border-[#111111]' 
+                    : 'bg-white text-[#111111] border-[#111111]'
+                }`}>
+                  {winner === 'USER' ? '★ Decision: User Won' : winner === 'OPPONENT' ? 'Decision: DealDebate Edge' : 'Decision: Balanced Draw'}
                 </span>
-                {opponent.stakes && (
-                  <span className="text-[11px] text-neutral-700 block truncate font-mono">Stakes: {opponent.stakes}</span>
-                )}
               </div>
-              <div>
-                <span className="text-neutral-400 block text-[10px] uppercase tracking-widest">Assessed Outcome:</span>
-                <span className="font-semibold text-[#111111] block mt-0.5 uppercase tracking-wide text-xs">{report.dealOutcome}</span>
-              </div>
+              <p className="text-sm sm:text-base font-serif text-[#111111] leading-relaxed">
+                "{cleanVerdict}"
+              </p>
             </div>
           </div>
 
-          {/* 1. Evaluator Executive Debrief */}
-          <div>
-            <h2 className="text-xs font-semibold uppercase tracking-widest text-[#111111] mb-3">
-              1. Evaluator Executive Debrief
-            </h2>
-            <div className="bg-neutral-50 border border-[#e5e5e5] rounded-none p-5 text-sm text-neutral-800 leading-relaxed font-sans">
-              "{report.executiveSummary}"
+          {/* 3. 3 Specific Strengths (With Quoted Moments) */}
+          <div className="space-y-3.5">
+            <div className="flex items-center justify-between">
+              <h2 className="text-xs font-bold uppercase tracking-widest text-[#111111] flex items-center gap-2">
+                <CheckCircle2 className="w-3.5 h-3.5 text-[#111111]" />
+                <span>3 Key Strengths (With Quoted Moments)</span>
+              </h2>
+              <span className="text-[10px] uppercase tracking-wider text-neutral-400">Verbatim audit</span>
             </div>
-          </div>
 
-          {/* 2. Core Competency Assessment Table */}
-          <div>
-            <h2 className="text-xs font-semibold uppercase tracking-widest text-[#111111] mb-3">
-              2. Core Competency Assessment (Scores Out of 10)
-            </h2>
-
-            <div className="border border-[#111111] rounded-none overflow-hidden font-sans">
-              <table className="w-full text-left text-xs border-collapse">
-                <thead>
-                  <tr className="bg-neutral-100 border-b border-[#111111] text-[#111111] uppercase tracking-wider font-semibold">
-                    <th className="py-3 px-4 w-44">Competency Pillar</th>
-                    <th className="py-3 px-3 w-20 text-center">Score</th>
-                    <th className="py-3 px-4">Evidence & Verbatim Analysis (Quoting Student)</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-[#e5e5e5]">
-                  {pillars.map((p, idx) => (
-                    <tr key={idx} className="hover:bg-neutral-50/70 transition-colors">
-                      <td className="py-3.5 px-4 align-top">
-                        <div className="font-semibold text-[#111111] text-xs uppercase tracking-wide">{p.name}</div>
-                        <div className="text-[11px] text-neutral-500 mt-0.5 leading-snug">{p.definition}</div>
-                      </td>
-                      <td className="py-3.5 px-3 align-top text-center font-mono">
-                        <span className="inline-block px-2.5 py-1 rounded-none text-xs font-bold bg-neutral-100 border border-[#111111] text-[#111111]">
-                          {p.score}/10
-                        </span>
-                      </td>
-                      <td className="py-3.5 px-4 align-top text-neutral-700 leading-relaxed">
-                        {p.evidence}
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          </div>
-
-          {/* 3. Diagnostic Audit: Weakest Turns & Rewrites */}
-          <div>
-            <h2 className="text-xs font-semibold uppercase tracking-widest text-[#111111] mb-3 flex items-center gap-2">
-              <AlertTriangle className="w-3.5 h-3.5 text-neutral-500" />
-              <span>3. Diagnostic Audit: 2 Weakest Turns & Recommended Executive Rewrites</span>
-            </h2>
-
-            <div className="space-y-4">
-              {report.weakestLines.map((item, idx) => (
-                <div key={idx} className="border border-[#e5e5e5] rounded-none p-5 text-xs space-y-3.5 bg-white font-sans">
-                  <div className="flex items-center justify-between border-b border-[#e5e5e5] pb-2">
-                    <span className="font-semibold text-[#111111] uppercase tracking-wider text-[11px]">Turn Audit #{idx + 1}</span>
-                    <span className="text-[10px] uppercase tracking-wider text-neutral-400">Verbatim statement review</span>
-                  </div>
-
-                  {/* Student quote */}
-                  <div>
-                    <span className="text-[10px] font-semibold text-neutral-500 uppercase tracking-widest block mb-1">
-                      Verbatim Statement Made:
-                    </span>
-                    <div className="p-3 rounded-none bg-neutral-50 border border-[#e5e5e5] text-neutral-800 font-mono text-xs italic">
-                      "{item.original}"
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+              {displayStrengths.slice(0, 3).map((item, idx) => (
+                <div 
+                  key={idx} 
+                  className="border border-[#111111] p-4 sm:p-5 bg-white flex flex-col justify-between space-y-3"
+                >
+                  <div className="space-y-2">
+                    <div className="text-[10px] uppercase tracking-widest font-mono text-neutral-400">
+                      Strength #{idx + 1}
+                    </div>
+                    <h3 className="font-serif text-base font-medium text-[#111111] leading-snug">
+                      {item.title}
+                    </h3>
+                    <div className="p-2.5 border border-[#e5e5e5] bg-neutral-50 text-[11px] font-mono text-neutral-700 italic leading-relaxed">
+                      "{cleanQuote(item.quote)}"
                     </div>
                   </div>
 
-                  {/* Diagnostic */}
-                  <div>
-                    <span className="text-[10px] font-semibold text-neutral-500 uppercase tracking-widest block mb-1">
-                      Tactical Deficit / Failure Mode:
+                  <p className="text-xs text-neutral-600 leading-relaxed font-sans pt-1 border-t border-[#f0f0f0]">
+                    {item.explanation}
+                  </p>
+                </div>
+              ))}
+            </div>
+          </div>
+
+          {/* 4. 3 Concrete Improvements (With Quoted Moments & Rewritten Examples) */}
+          <div className="space-y-3.5">
+            <div className="flex items-center justify-between">
+              <h2 className="text-xs font-bold uppercase tracking-widest text-[#111111] flex items-center gap-2">
+                <AlertTriangle className="w-3.5 h-3.5 text-neutral-500" />
+                <span>3 Concrete Improvements (With Rewritten Examples)</span>
+              </h2>
+              <span className="text-[10px] uppercase tracking-wider text-neutral-400">Tactical upgrades</span>
+            </div>
+
+            <div className="space-y-4">
+              {displayImprovements.slice(0, 3).map((item, idx) => (
+                <div 
+                  key={idx} 
+                  className="border border-[#e5e5e5] hover:border-[#111111] p-5 bg-white space-y-3 transition-colors"
+                >
+                  <div className="flex items-center justify-between border-b border-[#f0f0f0] pb-2">
+                    <div className="flex items-center gap-2">
+                      <span className="text-[10px] font-mono uppercase tracking-wider px-1.5 py-0.5 border border-[#111111] bg-neutral-50 font-semibold text-[#111111]">
+                        #{idx + 1}
+                      </span>
+                      <h3 className="font-serif text-base font-medium text-[#111111]">
+                        {item.title}
+                      </h3>
+                    </div>
+                    <span className="text-[10px] uppercase tracking-wider text-neutral-400 font-mono">
+                      Opportunity for Growth
                     </span>
-                    <p className="text-neutral-700 leading-relaxed">{item.critique}</p>
                   </div>
 
-                  {/* Recommended Rephrase */}
-                  <div>
-                    <span className="text-[10px] font-semibold text-[#111111] uppercase tracking-widest block mb-1">
-                      Recommended Executive Rephrase:
+                  {/* Quoted Moment & Critique */}
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs">
+                    <div>
+                      <span className="text-[10px] uppercase tracking-widest text-neutral-400 font-semibold block mb-1">
+                        What You Said (Quoted Moment):
+                      </span>
+                      <div className="p-3 border border-[#e5e5e5] bg-neutral-50 font-mono text-[11px] text-neutral-700 italic leading-relaxed">
+                        "{cleanQuote(item.quote)}"
+                      </div>
+                    </div>
+
+                    <div>
+                      <span className="text-[10px] uppercase tracking-widest text-neutral-400 font-semibold block mb-1">
+                        Tactical Critique:
+                      </span>
+                      <p className="text-neutral-600 leading-relaxed pt-1">
+                        {item.critique}
+                      </p>
+                    </div>
+                  </div>
+
+                  {/* Rewritten Example */}
+                  <div className="pt-2 border-t border-[#f0f0f0]">
+                    <span className="text-[10px] uppercase tracking-widest text-[#111111] font-bold block mb-1">
+                      Rewritten Example (What You Could Have Said):
                     </span>
-                    <div className="p-3 rounded-none bg-neutral-100 border border-[#111111] text-[#111111] font-medium leading-relaxed">
-                      "{item.rewrite}"
+                    <div className="p-3 bg-neutral-100 border border-[#111111] text-[#111111] font-sans font-medium text-xs sm:text-sm leading-relaxed">
+                      "{cleanQuote(item.rewrite)}"
                     </div>
                   </div>
                 </div>
@@ -363,18 +398,41 @@ ${report.topTip}
             </div>
           </div>
 
-          {/* 4. Strategic Directive */}
-          <div>
-            <h2 className="text-xs font-semibold uppercase tracking-widest text-[#111111] mb-3 flex items-center gap-2">
-              <Lightbulb className="w-3.5 h-3.5 text-neutral-500" />
-              <span>4. Strategic Directive for Subsequent Sessions</span>
+          {/* 5. Core Competency Scores (At-a-Glance Grid, Not Wall of Text) */}
+          <div className="space-y-3">
+            <h2 className="text-xs font-bold uppercase tracking-widest text-[#111111]">
+              Core Competency Breakdown (Scores Out of 10)
             </h2>
-            <div className="border border-[#111111] bg-white rounded-none p-5 text-sm text-[#111111] leading-relaxed font-sans font-medium">
-              {report.topTip}
+
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 font-sans">
+              {pillars.map((p, idx) => (
+                <div key={idx} className="border border-[#111111] p-4 bg-white flex flex-col justify-between space-y-2">
+                  <div className="flex items-center justify-between border-b border-[#f0f0f0] pb-2">
+                    <span className="font-semibold text-xs uppercase tracking-wider text-[#111111]">{p.name}</span>
+                    <span className="font-mono text-xs font-bold px-2 py-0.5 bg-neutral-100 border border-[#111111] text-[#111111]">
+                      {p.score}/10
+                    </span>
+                  </div>
+                  <p className="text-[11px] text-neutral-600 leading-relaxed">
+                    {p.reason}
+                  </p>
+                </div>
+              ))}
             </div>
           </div>
 
-          {/* Full Chronological Transcript Accordion */}
+          {/* 6. Strategic Takeaway Directive */}
+          <div className="border border-[#111111] bg-white p-5 space-y-1.5 font-sans">
+            <div className="flex items-center gap-2 text-xs font-bold uppercase tracking-widest text-[#111111]">
+              <Lightbulb className="w-3.5 h-3.5 text-neutral-600" />
+              <span>Key Directive for Your Next Simulation</span>
+            </div>
+            <p className="text-sm font-medium text-[#111111] leading-relaxed">
+              {report.topTip}
+            </p>
+          </div>
+
+          {/* 7. Collapsible Chronological Transcript */}
           <div className="border-t border-[#e5e5e5] pt-5">
             <button
               onClick={() => setShowTranscript(!showTranscript)}
@@ -402,8 +460,8 @@ ${report.topTip}
                     }`}
                   >
                     <div className="flex items-center justify-between text-[10px] uppercase tracking-wider text-neutral-400 mb-1 font-medium">
-                      <span>{m.role === 'assistant' ? `DealDebate (${opponent.title})` : 'You (Candidate)'}</span>
-                      <span>Round {m.round}</span>
+                      <span>{m.role === 'assistant' ? `DealDebate (${opponent.title})` : 'You'}</span>
+                      <span className="font-mono">Round {m.round}</span>
                     </div>
                     <div className="whitespace-pre-wrap">{m.content}</div>
                   </div>

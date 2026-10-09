@@ -68,6 +68,11 @@ ${record.messages
     setTimeout(() => setCopied(false), 2000);
   };
 
+  const cleanQuote = (q?: string) => {
+    if (!q) return '';
+    return q.replace(/^["'“”]+|["'“”]+$/g, '').trim();
+  };
+
   const pillarsForRecord = (record: SavedSessionRecord) => [
     { name: 'Persuasion', pillar: record.reportCard.persuasion },
     { name: 'Handling Objections', pillar: record.reportCard.handlingObjections },
@@ -213,6 +218,75 @@ ${record.messages
                 {/* Tab A: Report Card Details */}
                 {activeTab === 'report' && (
                   <div className="space-y-6">
+                    {/* One-Line Verdict Banner */}
+                    {activeRecord.reportCard.verdict && (
+                      <div className="border border-[#111111] p-4 bg-neutral-50 text-[#111111]">
+                        <span className="text-[10px] font-bold uppercase tracking-widest text-neutral-500 block mb-1">
+                          Debate Verdict
+                        </span>
+                        <p className="text-sm font-serif text-[#111111] leading-relaxed">
+                          "{cleanQuote(activeRecord.reportCard.verdict)}"
+                        </p>
+                      </div>
+                    )}
+
+                    {/* 3 Strengths */}
+                    {activeRecord.reportCard.strengths && activeRecord.reportCard.strengths.length > 0 && (
+                      <div>
+                        <h4 className="text-xs font-semibold uppercase tracking-widest text-[#111111] mb-2 flex items-center gap-1.5">
+                          <Check className="w-3.5 h-3.5 text-[#111111]" />
+                          <span>Key Strengths (With Quoted Moments)</span>
+                        </h4>
+                        <div className="space-y-3">
+                          {activeRecord.reportCard.strengths.slice(0, 3).map((item, idx) => (
+                            <div key={idx} className="border border-[#111111] p-3.5 bg-white space-y-2 text-xs">
+                              <span className="font-semibold text-xs uppercase tracking-wider text-[#111111] block">
+                                #{idx + 1}. {item.title}
+                              </span>
+                              <div className="p-2 border border-[#e5e5e5] bg-neutral-50 text-[11px] font-mono italic text-neutral-700">
+                                "{cleanQuote(item.quote)}"
+                              </div>
+                              <p className="text-neutral-600 text-xs leading-relaxed">
+                                {item.explanation}
+                              </p>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+
+                    {/* 3 Concrete Improvements */}
+                    {activeRecord.reportCard.improvements && activeRecord.reportCard.improvements.length > 0 && (
+                      <div>
+                        <h4 className="text-xs font-semibold uppercase tracking-widest text-[#111111] mb-2 flex items-center gap-1.5">
+                          <AlertTriangle className="w-3.5 h-3.5 text-neutral-500" />
+                          <span>Concrete Improvements (With Rewritten Examples)</span>
+                        </h4>
+                        <div className="space-y-3">
+                          {activeRecord.reportCard.improvements.slice(0, 3).map((item, idx) => (
+                            <div key={idx} className="border border-[#e5e5e5] p-3.5 space-y-2 text-xs bg-white">
+                              <span className="font-semibold text-xs uppercase tracking-wider text-[#111111] block">
+                                #{idx + 1}. {item.title}
+                              </span>
+                              <div>
+                                <span className="text-[10px] uppercase tracking-wider text-neutral-400 block font-medium">What You Said:</span>
+                                <div className="p-2 border border-[#e5e5e5] bg-neutral-50 italic text-neutral-700 font-mono text-[11px] mt-0.5">
+                                  "{cleanQuote(item.quote)}"
+                                </div>
+                              </div>
+                              <p className="text-neutral-600 text-xs">{item.critique}</p>
+                              <div>
+                                <span className="text-[10px] uppercase tracking-wider text-[#111111] font-semibold block">Rewritten Example:</span>
+                                <div className="p-2 border border-[#111111] bg-neutral-100 text-[#111111] font-medium text-xs mt-0.5">
+                                  "{cleanQuote(item.rewrite)}"
+                                </div>
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+
                     {/* Executive Debrief */}
                     <div>
                       <h4 className="text-xs font-semibold uppercase tracking-widest text-[#111111] mb-2">
@@ -244,38 +318,6 @@ ${record.messages
                         ))}
                       </div>
                     </div>
-
-                    {/* Weakest Statement Rewrites */}
-                    {activeRecord.reportCard.weakestLines && activeRecord.reportCard.weakestLines.length > 0 && (
-                      <div>
-                        <h4 className="text-xs font-semibold uppercase tracking-widest text-[#111111] mb-2 flex items-center gap-1.5">
-                          <AlertTriangle className="w-3.5 h-3.5 text-neutral-500" />
-                          <span>Diagnostic Audit & Executive Rewrites</span>
-                        </h4>
-                        <div className="space-y-3">
-                          {activeRecord.reportCard.weakestLines.map((item, idx) => (
-                            <div key={idx} className="border border-[#e5e5e5] p-4 space-y-2 text-xs">
-                              <div className="text-[10px] uppercase tracking-wider text-neutral-400 font-semibold">
-                                Audit #{idx + 1}
-                              </div>
-                              <div>
-                                <span className="text-[10px] uppercase tracking-wider text-neutral-400 block">Original Quote:</span>
-                                <div className="p-2 border border-[#e5e5e5] bg-neutral-50 italic text-neutral-700 font-mono text-[11px] mt-0.5">
-                                  "{item.original}"
-                                </div>
-                              </div>
-                              <p className="text-neutral-600 text-xs">{item.critique}</p>
-                              <div>
-                                <span className="text-[10px] uppercase tracking-wider text-[#111111] font-semibold block">Executive Rewrite:</span>
-                                <div className="p-2 border border-[#111111] bg-neutral-100 text-[#111111] font-medium text-xs mt-0.5">
-                                  "{item.rewrite}"
-                                </div>
-                              </div>
-                            </div>
-                          ))}
-                        </div>
-                      </div>
-                    )}
 
                     {/* Strategic Directive */}
                     <div>

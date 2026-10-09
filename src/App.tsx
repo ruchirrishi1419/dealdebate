@@ -1,13 +1,24 @@
 import React, { useState } from 'react';
 import { HomeScreen } from './components/HomeScreen';
 import { ChatScreen } from './components/ChatScreen';
+import { VoiceScreen } from './components/VoiceScreen';
 import { ReportCardScreen } from './components/ReportCardScreen';
 import { HistorySidebar } from './components/HistorySidebar';
+import { ModeSelectionModal } from './components/ModeSelectionModal';
 import { OpponentProfile, ChatMessage, ReportCard, ScenarioCategory, DifficultyLevel, SavedSessionRecord } from './types';
 import { AlertCircle, X } from 'lucide-react';
 
+interface PendingDebateConfig {
+  scenarioText: string;
+  role: string;
+  dealSize: string;
+  selectedCategory: ScenarioCategory;
+  userRole?: string;
+  difficulty: DifficultyLevel;
+}
+
 export default function App() {
-  const [screen, setScreen] = useState<'home' | 'chat' | 'report'>('home');
+  const [screen, setScreen] = useState<'home' | 'chat' | 'voice' | 'report'>('home');
   const [scenario, setScenario] = useState('');
   const [category, setCategory] = useState<ScenarioCategory>('NEGOTIATION');
   const [opponent, setOpponent] = useState<OpponentProfile | null>(null);
@@ -18,6 +29,10 @@ export default function App() {
   const [isEvaluating, setIsEvaluating] = useState(false);
   const [reportCard, setReportCard] = useState<ReportCard | null>(null);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
+
+  // Mode Selection Modal state
+  const [isModeModalOpen, setIsModeModalOpen] = useState(false);
+  const [pendingConfig, setPendingConfig] = useState<PendingDebateConfig | null>(null);
 
   // Session history records (persisted across page reloads in current browser session)
   const [savedRecords, setSavedRecords] = useState<SavedSessionRecord[]>(() => {
@@ -36,8 +51,8 @@ export default function App() {
     return d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
   };
 
-  // Start negotiation from Home Screen
-  const handleStartNegotiation = async (
+  // Called when user picks a topic and difficulty on HomeScreen: prompts Mode Selection popup
+  const handlePromptModeSelection = async (
     scenarioText: string,
     role: string,
     dealSize: string,
@@ -45,6 +60,30 @@ export default function App() {
     userRole?: string,
     difficulty: DifficultyLevel = 'EASY'
   ) => {
+    setPendingConfig({
+      scenarioText,
+      role,
+      dealSize,
+      selectedCategory,
+      userRole,
+      difficulty
+    });
+    setIsModeModalOpen(true);
+  };
+
+  // Execute debate initialization with selected mode ('text' | 'voice')
+  const handleStartNegotiationWithMode = async (mode: 'text' | 'voice') => {
+    if (!pendingConfig) return;
+
+    const {
+      scenarioText,
+      role,
+      dealSize,
+      selectedCategory,
+      userRole,
+      difficulty
+    } = pendingConfig;
+
     setIsInitializing(true);
     setErrorMessage(null);
     setScenario(scenarioText);
@@ -95,7 +134,10 @@ export default function App() {
       ]);
       setCurrentRound(1);
       setReportCard(null);
-      setScreen('chat');
+
+      // Close mode modal and enter selected screen
+      setIsModeModalOpen(false);
+      setScreen(mode === 'voice' ? 'voice' : 'chat');
     } catch (err: unknown) {
       console.error('Initialization error:', err);
       setErrorMessage(
@@ -131,7 +173,8 @@ export default function App() {
           scenario: activeScenario,
           opponent: activeOpponent,
           history: historyPayload,
-          category
+          category,
+          difficulty: activeOpponent.difficulty || 'EASY'
         })
       });
 
@@ -262,14 +305,14 @@ export default function App() {
 
   // Restart same scenario
   const handleRestartSame = async () => {
-    if (scenario) {
-      handleStartNegotiation(
+    if (scenario && opponent) {
+      handlePromptModeSelection(
         scenario, 
-        opponent?.title || '', 
-        opponent?.stakes || '', 
+        opponent.title || '', 
+        opponent.stakes || '', 
         category,
-        opponent?.userRole || '',
-        opponent?.difficulty || 'EASY'
+        opponent.userRole || '',
+        opponent.difficulty || 'EASY'
       );
     } else {
       setScreen('home');
@@ -319,7 +362,7 @@ export default function App() {
       {/* Screen Router */}
       {screen === 'home' && (
         <HomeScreen
-          onStart={handleStartNegotiation}
+          onStart={handlePromptModeSelection}
           isLoading={isInitializing}
           onOpenHistory={() => setIsHistoryOpen(true)}
           historyCount={savedRecords.length}
@@ -340,6 +383,22 @@ export default function App() {
           onForceEvaluate={messages.length >= 4 ? handleForceEvaluate : undefined}
           onOpenHistory={() => setIsHistoryOpen(true)}
           historyCount={savedRecords.length}
+          onSwitchToVoiceMode={() => setScreen('voice')}
+        />
+      )}
+
+      {screen === 'voice' && opponent && (
+        <VoiceScreen
+          scenario={scenario}
+          opponent={opponent}
+          messages={messages}
+          currentRound={currentRound}
+          totalRounds={6}
+          isOpponentTyping={isOpponentTyping}
+          isEvaluating={isEvaluating}
+          onSendMessage={handleSendMessage}
+          onSwitchToTextMode={() => setScreen('chat')}
+          onQuitToHome={() => setScreen('home')}
         />
       )}
 
@@ -360,6 +419,16 @@ export default function App() {
           historyCount={savedRecords.length}
         />
       )}
+
+      {/* Mode Selection Modal (Requirement 1) */}
+      <ModeSelectionModal
+        isOpen={isModeModalOpen}
+        scenario={pendingConfig?.scenarioText || ''}
+        difficulty={pendingConfig?.difficulty || 'EASY'}
+        isLoading={isInitializing}
+        onSelectMode={handleStartNegotiationWithMode}
+        onClose={() => setIsModeModalOpen(false)}
+      />
 
       {/* Session History Sidebar Drawer */}
       <HistorySidebar
