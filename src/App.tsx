@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { HomeScreen } from './components/HomeScreen';
 import { ChatScreen } from './components/ChatScreen';
 import { VoiceScreen } from './components/VoiceScreen';
@@ -7,6 +7,7 @@ import { HistorySidebar } from './components/HistorySidebar';
 import { ModeSelectionModal } from './components/ModeSelectionModal';
 import { OpponentProfile, ChatMessage, ReportCard, ScenarioCategory, DifficultyLevel, SavedSessionRecord } from './types';
 import { AlertCircle, X } from 'lucide-react';
+import { ensureVoicesLoaded } from './utils/speechDebate';
 
 interface PendingDebateConfig {
   scenarioText: string;
@@ -45,6 +46,11 @@ export default function App() {
     return [];
   });
   const [isHistoryOpen, setIsHistoryOpen] = useState(false);
+
+  // Preload and lock in DealDebate's voice on application mount
+  useEffect(() => {
+    ensureVoicesLoaded();
+  }, []);
 
   const formatTimestamp = () => {
     const d = new Date();

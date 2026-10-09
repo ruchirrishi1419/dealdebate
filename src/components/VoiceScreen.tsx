@@ -12,12 +12,16 @@ import {
   VolumeX, 
   Loader2, 
   Check, 
-  AlertCircle
+  AlertCircle,
+  RefreshCw
 } from 'lucide-react';
 import { 
   speakText, 
   isSpeechRecognitionSupported, 
-  isSpeechSynthesisSupported 
+  isSpeechSynthesisSupported,
+  getSpeechRecognitionConstructor,
+  requestMicPermission,
+  ensureVoicesLoaded 
 } from '../utils/speechDebate';
 
 interface VoiceScreenProps {
@@ -56,14 +60,25 @@ export const VoiceScreen: React.FC<VoiceScreenProps> = ({
   const [isAudioMuted, setIsAudioMuted] = useState(false);
   const [statusNotice, setStatusNotice] = useState<string | null>(null);
 
-  // References for speech lifecycle
+  // Status line explicitly tracking speech state: "Listening...", "Heard you", or error notices
+  const [voiceStatus, setVoiceStatus] = useState<string>('Ready · Standby');
+  const [isMicPermissionGranted, setIsMicPermissionGranted] = useState<boolean | null>(null);
+
+  // References for speech lifecycle (refs protect against stale React closures)
   const recognitionRef = useRef<any>(null);
   const cancelSpeechRef = useRef<(() => void) | null>(null);
   const silenceTimerRef = useRef<NodeJS.Timeout | null>(null);
+  const restartTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const lastSpokenMessageIdRef = useRef<string | null>(null);
   const isComponentMountedRef = useRef(true);
   const transcriptBottomRef = useRef<HTMLDivElement>(null);
+
+  // Synchronous state refs to prevent race conditions during continuous speech loop
+  const isUserTurnRef = useRef(false);
   const isListeningActiveRef = useRef(false);
+  const isSubmittingRef = useRef(false);
+  const liveUserTranscriptRef = useRef('');
+  const accumulatedFinalRef = useRef('');
 
   // Find the latest assistant message
   const assistantMessages = messages.filter((m) => m.role === 'assistant');
@@ -83,6 +98,7 @@ export const VoiceScreen: React.FC<VoiceScreenProps> = ({
     isComponentMountedRef.current = true;
     return () => {
       isComponentMountedRef.current = false;
+      isUserTurnRef.current = false;
       isListeningActiveRef.current = false;
       if (cancelSpeechRef.current) {
         cancelSpeechRef.current();
@@ -95,25 +111,54 @@ export const VoiceScreen: React.FC<VoiceScreenProps> = ({
       if (silenceTimerRef.current) {
         clearTimeout(silenceTimerRef.current);
       }
+      if (restartTimeoutRef.current) {
+        clearTimeout(restartTimeoutRef.current);
+      }
     };
   }, []);
 
-  // Check speech recognition support on mount - show friendly notice if absent
+  // Check speech recognition support and ensure voice is loaded on mount
   useEffect(() => {
+    ensureVoicesLoaded();
     if (!isSpeechRecognitionSupported()) {
-      setStatusNotice('Speech recognition not supported in this browser. You can tap the orb to type or switch to Text Mode.');
+      setVoiceStatus('Speech recognition not supported in this browser');
+      setStatusNotice('Speech recognition not supported in this browser. Please use Chrome/Safari or switch to Text Mode.');
     }
   }, []);
 
-  // Start Speech Recognition when it is User's Turn
-  const startListening = () => {
+  // Request mic permission and start recognition
+  const startListening = async (isManualTrigger = false) => {
     if (!isSpeechRecognitionSupported()) {
-      setStatusNotice('Microphone speech recognition is unavailable. Tap "Done Speaking" or switch to Text Mode.');
-      setOrbState('user_turn');
+      setVoiceStatus('Speech recognition not supported in this browser');
+      setStatusNotice('Speech recognition not supported in this browser. Switch to Text Mode.');
       return;
     }
 
-    // Stop any existing session
+    // Clear any pending restart timeout
+    if (restartTimeoutRef.current) {
+      clearTimeout(restartTimeoutRef.current);
+      restartTimeoutRef.current = null;
+    }
+
+    // Verify mic permission via getUserMedia
+    const permResult = await requestMicPermission();
+    if (!permResult.granted) {
+      setIsMicPermissionGranted(false);
+      const errMsg = permResult.error === 'Mic blocked' ? 'Mic blocked' : (permResult.error || 'Mic error');
+      setVoiceStatus(errMsg);
+      setStatusNotice(
+        errMsg === 'Mic blocked'
+          ? 'Mic blocked. Please allow microphone permissions in your browser or tap the orb to retry.'
+          : `${errMsg}. Tap the orb to retry.`
+      );
+      if (!isManualTrigger) {
+        return;
+      }
+    } else {
+      setIsMicPermissionGranted(true);
+    }
+
+    // Abort any existing instance cleanly
     if (recognitionRef.current) {
       try {
         recognitionRef.current.abort();
@@ -122,20 +167,30 @@ export const VoiceScreen: React.FC<VoiceScreenProps> = ({
     }
 
     try {
-      const SpeechRecognition =
-        (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
-      const recognition = new SpeechRecognition();
+      const SpeechRecognitionClass = getSpeechRecognitionConstructor();
+      if (!SpeechRecognitionClass) {
+        setVoiceStatus('Speech recognition not supported in this browser');
+        return;
+      }
+
+      const recognition = new SpeechRecognitionClass();
       recognition.continuous = true;
       recognition.interimResults = true;
       recognition.lang = 'en-US';
 
-      setLiveUserTranscript('');
-      let accumulatedFinal = '';
+      // Keep existing transcript if user is continuing during the same turn
+      if (isManualTrigger && !liveUserTranscriptRef.current) {
+        setLiveUserTranscript('');
+        accumulatedFinalRef.current = '';
+        liveUserTranscriptRef.current = '';
+      }
 
       recognition.onstart = () => {
         if (!isComponentMountedRef.current) return;
         isListeningActiveRef.current = true;
         setOrbState('user_turn');
+        setVoiceStatus('Listening...');
+        setStatusNotice(null);
       };
 
       recognition.onresult = (event: any) => {
@@ -143,67 +198,105 @@ export const VoiceScreen: React.FC<VoiceScreenProps> = ({
         let interim = '';
         for (let i = event.resultIndex; i < event.results.length; ++i) {
           if (event.results[i].isFinal) {
-            accumulatedFinal += ' ' + event.results[i][0].transcript;
+            accumulatedFinalRef.current += ' ' + event.results[i][0].transcript;
           } else {
             interim += event.results[i][0].transcript;
           }
         }
 
-        const currentText = (accumulatedFinal + ' ' + interim).trim();
+        const currentText = (accumulatedFinalRef.current + ' ' + interim).trim();
+        liveUserTranscriptRef.current = currentText;
         setLiveUserTranscript(currentText);
+
+        // Make speech detection immediately visible: "Heard you"
+        if (currentText.length > 0) {
+          setVoiceStatus('Heard you');
+        }
 
         // Reset silence timer whenever user speaks
         if (silenceTimerRef.current) {
           clearTimeout(silenceTimerRef.current);
         }
 
-        // When user speaks something substantial, auto-submit after 2.4s of quiet
+        // When user speaks something substantial, auto-submit after 2.5s of quiet
         if (currentText.length > 5) {
           silenceTimerRef.current = setTimeout(() => {
-            if (isComponentMountedRef.current && isListeningActiveRef.current) {
+            if (isComponentMountedRef.current && isUserTurnRef.current && !isSubmittingRef.current) {
               handleFinishUserSpeaking(currentText);
             }
-          }, 2400);
+          }, 2500);
         }
       };
 
       recognition.onerror = (event: any) => {
         console.warn('SpeechRecognition event note:', event.error);
         if (event.error === 'not-allowed' || event.error === 'service-not-allowed') {
-          setStatusNotice('Microphone access not granted. Tap the orb to submit or switch to Text Mode.');
+          setIsMicPermissionGranted(false);
+          setVoiceStatus('Mic blocked');
+          setStatusNotice('Mic blocked. Check browser permissions or tap the orb to retry.');
+          isListeningActiveRef.current = false;
+        } else if (event.error === 'no-speech') {
+          // Handled gracefully in onend (will restart seamlessly if still user's turn)
+          if (liveUserTranscriptRef.current.trim().length === 0) {
+            setVoiceStatus('Listening...');
+          }
+        } else if (event.error === 'audio-capture') {
+          setVoiceStatus('Audio capture failed');
+          setStatusNotice('Audio capture failed. Ensure your microphone is connected and tap the orb.');
+        } else {
+          setVoiceStatus(`Mic error: ${event.error}`);
         }
       };
 
       recognition.onend = () => {
-        // If still in user_turn and hasn't submitted yet:
-        if (isComponentMountedRef.current && isListeningActiveRef.current && orbState === 'user_turn') {
-          if (liveUserTranscript.trim().length > 6) {
-            handleFinishUserSpeaking(liveUserTranscript.trim());
+        isListeningActiveRef.current = false;
+
+        // Requirement 1 & 4: Restart if it stops while it is still the user's turn
+        if (isComponentMountedRef.current && isUserTurnRef.current && !isSubmittingRef.current) {
+          const currentText = liveUserTranscriptRef.current.trim();
+          // If substantial text was captured and user paused, we can submit
+          if (currentText.length > 10 && silenceTimerRef.current === null) {
+            handleFinishUserSpeaking(currentText);
           } else {
-            // Keep listening seamlessly
-            try {
-              recognition.start();
-            } catch {}
+            // Keep listening seamlessly - restart recognition so the mic never dies silently!
+            if (restartTimeoutRef.current) clearTimeout(restartTimeoutRef.current);
+            restartTimeoutRef.current = setTimeout(() => {
+              if (isComponentMountedRef.current && isUserTurnRef.current && !isSubmittingRef.current) {
+                try {
+                  startListening();
+                } catch (e) {
+                  console.warn('Restart speech recognition note:', e);
+                }
+              }
+            }, 150);
           }
         }
       };
 
       recognition.start();
       recognitionRef.current = recognition;
-    } catch (err) {
-      console.warn('SpeechRecognition start notice:', err);
-      setStatusNotice('Unable to start mic. You can tap the orb to submit your response.');
+    } catch (err: any) {
+      console.warn('SpeechRecognition start error:', err);
+      const errMessage = err?.message || 'Unable to access mic';
+      setVoiceStatus(`Mic error: ${errMessage}`);
+      setStatusNotice('Unable to start mic automatically. Tap the orb to trigger listening.');
       setOrbState('user_turn');
     }
   };
 
   // Stop listening and submit user turn into the debate loop
   const handleFinishUserSpeaking = async (overrideText?: string) => {
+    isUserTurnRef.current = false;
     isListeningActiveRef.current = false;
+    isSubmittingRef.current = true;
 
     if (silenceTimerRef.current) {
       clearTimeout(silenceTimerRef.current);
       silenceTimerRef.current = null;
+    }
+    if (restartTimeoutRef.current) {
+      clearTimeout(restartTimeoutRef.current);
+      restartTimeoutRef.current = null;
     }
 
     if (recognitionRef.current) {
@@ -213,19 +306,29 @@ export const VoiceScreen: React.FC<VoiceScreenProps> = ({
       recognitionRef.current = null;
     }
 
-    const submissionText = (overrideText || liveUserTranscript).trim();
+    const submissionText = (overrideText || liveUserTranscriptRef.current || liveUserTranscript).trim();
     if (!submissionText || isOpponentTyping || isEvaluating) {
-      // If user had nothing recorded yet, prompt gently
-      if (!submissionText) {
-        setStatusNotice('No speech detected yet. Speak your counter-argument or tap the orb.');
+      isSubmittingRef.current = false;
+      // If user had nothing recorded yet, prompt gently and resume listening
+      if (!submissionText && currentRound <= totalRounds) {
+        setVoiceStatus('Listening...');
+        isUserTurnRef.current = true;
+        startListening(true);
       }
       return;
     }
 
-    setStatusNotice(null);
+    setVoiceStatus('Submitting turn...');
     setOrbState('idle');
     setLiveUserTranscript('');
-    await onSendMessage(submissionText);
+    liveUserTranscriptRef.current = '';
+    accumulatedFinalRef.current = '';
+
+    try {
+      await onSendMessage(submissionText);
+    } finally {
+      isSubmittingRef.current = false;
+    }
   };
 
   // Voice Debate Loop Effect: Speaks DealDebate's response aloud, then opens mic automatically
@@ -238,16 +341,27 @@ export const VoiceScreen: React.FC<VoiceScreenProps> = ({
     }
 
     lastSpokenMessageIdRef.current = latestAssistantMessage.id;
+    isUserTurnRef.current = false;
+
+    // Reset transcripts for the upcoming exchange
+    setLiveUserTranscript('');
+    liveUserTranscriptRef.current = '';
+    accumulatedFinalRef.current = '';
 
     if (isAudioMuted || !isSpeechSynthesisSupported()) {
       // If muted or speech synthesis unsupported, immediately open mic for user's turn
-      setOrbState('user_turn');
-      startListening();
+      if (currentRound <= totalRounds && !isEvaluating) {
+        isUserTurnRef.current = true;
+        setOrbState('user_turn');
+        setVoiceStatus('Listening...');
+        startListening();
+      }
       return;
     }
 
     // Set state to DealDebate speaking
     setOrbState('speaking');
+    setVoiceStatus('DealDebate is speaking...');
 
     // Cancel any prior speech
     if (cancelSpeechRef.current) {
@@ -258,45 +372,61 @@ export const VoiceScreen: React.FC<VoiceScreenProps> = ({
     cancelSpeechRef.current = speakText(latestAssistantMessage.content, {
       onStart: () => {
         if (isComponentMountedRef.current) {
+          isUserTurnRef.current = false;
           setOrbState('speaking');
+          setVoiceStatus('DealDebate is speaking...');
         }
       },
       onEnd: () => {
         if (!isComponentMountedRef.current) return;
-        // When speech finishes: DO NOT switch to text mode!
-        // Automatically open the mic and stay in voice screen hands-free
+        // Requirement 1: When DealDebate finishes speaking (utterance onend),
+        // stay on voice screen, automatically transition orb to user_turn, and start listening!
         if (currentRound <= totalRounds && !isEvaluating) {
+          isUserTurnRef.current = true;
           setOrbState('user_turn');
-          startListening();
+          setVoiceStatus('Listening...');
+          // Small 120ms safety timeout to allow audio output hardware to release before capturing
+          setTimeout(() => {
+            if (isComponentMountedRef.current && isUserTurnRef.current) {
+              startListening();
+            }
+          }, 120);
         } else {
+          isUserTurnRef.current = false;
           setOrbState('idle');
+          setVoiceStatus('Debate completed');
         }
       },
-      onError: () => {
+      onError: (err) => {
+        console.warn('Speech playback note:', err);
         if (!isComponentMountedRef.current) return;
         if (currentRound <= totalRounds && !isEvaluating) {
+          isUserTurnRef.current = true;
           setOrbState('user_turn');
+          setVoiceStatus('Listening...');
           startListening();
         } else {
+          isUserTurnRef.current = false;
           setOrbState('idle');
         }
       }
     });
   }, [latestAssistantMessage?.id, isAudioMuted, currentRound, totalRounds, isEvaluating]);
 
-  // Handle manual orb tap
-  const handleOrbClick = () => {
-    if (orbState === 'user_turn') {
-      if (liveUserTranscript.trim().length > 0) {
-        handleFinishUserSpeaking();
-      } else {
-        // Toggle listening if empty
-        startListening();
-      }
-    } else if (orbState === 'idle' && !isOpponentTyping && !isEvaluating) {
-      setOrbState('user_turn');
-      startListening();
+  // Handle manual orb tap (Requirement 3: Fallback manually starts the mic)
+  const handleOrbClick = async () => {
+    // If user has already spoken something substantial, tapping the orb submits the turn
+    const currentText = liveUserTranscriptRef.current.trim();
+    if (isUserTurnRef.current && currentText.length > 0) {
+      await handleFinishUserSpeaking(currentText);
+      return;
     }
+
+    // Otherwise, tapping the orb ALWAYS manually starts/restarts the mic as a 100% reliable fallback!
+    isUserTurnRef.current = true;
+    setOrbState('user_turn');
+    setVoiceStatus('Listening...');
+    await startListening(true);
   };
 
   return (
@@ -308,12 +438,24 @@ export const VoiceScreen: React.FC<VoiceScreenProps> = ({
             <AlertCircle className="w-4 h-4 text-[#111111] shrink-0" />
             <span>{statusNotice}</span>
           </div>
-          <button 
-            onClick={() => setStatusNotice(null)}
-            className="text-[10px] uppercase font-mono tracking-wider font-semibold hover:underline"
-          >
-            Dismiss
-          </button>
+          <div className="flex items-center gap-2">
+            <button 
+              onClick={() => {
+                setStatusNotice(null);
+                startListening(true);
+              }}
+              className="text-[10px] uppercase font-mono tracking-wider font-semibold underline hover:text-black"
+            >
+              Retry Mic
+            </button>
+            <span className="text-neutral-400">·</span>
+            <button 
+              onClick={() => setStatusNotice(null)}
+              className="text-[10px] uppercase font-mono tracking-wider font-semibold hover:underline"
+            >
+              Dismiss
+            </button>
+          </div>
         </div>
       )}
 
@@ -402,7 +544,7 @@ export const VoiceScreen: React.FC<VoiceScreenProps> = ({
           {/* Pure CSS Black Hole Orb Sphere with Accretion Ring (Black Sphere, Glowing Accretion Ring) */}
           <div
             onClick={handleOrbClick}
-            className={`relative rounded-full cursor-pointer transition-all duration-500 flex items-center justify-center select-none shadow-2xl ${
+            className={`relative rounded-full cursor-pointer transition-all duration-500 flex items-center justify-center select-none shadow-2xl active:scale-95 ${
               orbState === 'speaking'
                 ? 'w-48 h-48 sm:w-64 sm:h-64 animate-orb-speaking'
                 : orbState === 'user_turn'
@@ -418,13 +560,7 @@ export const VoiceScreen: React.FC<VoiceScreenProps> = ({
                   ? '2px solid #111111'
                   : '1.5px solid #262626',
             }}
-            title={
-              orbState === 'user_turn'
-                ? 'Microphone is listening - speak your argument (tap to submit)'
-                : orbState === 'speaking'
-                ? 'DealDebate is speaking'
-                : 'Standby - Tap to speak'
-            }
+            title="Tap orb anytime to manually start mic or submit your speech"
           >
             {/* Center Horizon Circle */}
             <div className="w-36 h-36 sm:w-48 sm:h-48 rounded-full bg-[#0d0d0d] flex flex-col items-center justify-center p-3 text-center pointer-events-none shadow-[inset_0_0_25px_rgba(255,255,255,0.06)] border border-neutral-800/80">
@@ -445,43 +581,76 @@ export const VoiceScreen: React.FC<VoiceScreenProps> = ({
                 <div className="flex flex-col items-center gap-2">
                   <div className="w-3.5 h-3.5 rounded-full bg-white animate-ping" />
                   <span className="text-[10px] font-mono uppercase tracking-widest text-white font-semibold">
-                    Listening
+                    {voiceStatus === 'Heard you' ? 'Heard You' : 'Listening'}
                   </span>
                 </div>
               ) : (
                 <div className="flex flex-col items-center gap-1.5">
                   <div className="w-2 h-2 rounded-full bg-neutral-600" />
                   <span className="text-[9px] font-mono uppercase tracking-widest text-neutral-400">
-                    {isOpponentTyping || isEvaluating ? 'Formulating' : 'Standby'}
+                    {isOpponentTyping || isEvaluating ? 'Formulating' : 'Tap to Speak'}
                   </span>
                 </div>
               )}
             </div>
           </div>
 
-          {/* Subtitle Status Indicator */}
-          <div className="mt-8 text-center px-4 max-w-sm">
-            <p className="text-xs uppercase tracking-widest font-mono text-neutral-600 font-medium">
-              {orbState === 'speaking' && 'DealDebate is speaking...'}
-              {orbState === 'user_turn' && 'Microphone open · Speak your counter-argument'}
-              {orbState === 'idle' &&
+          {/* Visible Status Line (Requirement 2: Make Failures Visible, No Silent Failures) */}
+          <div className="mt-7 text-center px-4 max-w-md flex flex-col items-center">
+            <div className="inline-flex items-center gap-2 px-3 py-1.5 border border-[#111111]/15 bg-white shadow-xs">
+              <span className={`w-2 h-2 rounded-full shrink-0 ${
+                voiceStatus.toLowerCase().includes('blocked') || voiceStatus.toLowerCase().includes('error') || voiceStatus.toLowerCase().includes('not supported')
+                  ? 'bg-red-500'
+                  : voiceStatus === 'Heard you'
+                  ? 'bg-emerald-600 animate-pulse'
+                  : voiceStatus === 'Listening...'
+                  ? 'bg-[#111111] animate-ping'
+                  : 'bg-neutral-400'
+              }`} />
+              <span className="font-mono text-xs uppercase tracking-widest text-[#111111] font-semibold">
+                {voiceStatus}
+              </span>
+            </div>
+
+            {/* Helper guidance line */}
+            <p className="mt-2 text-[11px] text-neutral-500 font-sans text-center">
+              {voiceStatus === 'Listening...' && 'Speak your counter-argument · Tap orb to submit or restart'}
+              {voiceStatus === 'Heard you' && 'Pause to submit automatically or tap the orb to submit now'}
+              {voiceStatus === 'DealDebate is speaking...' && 'Listen to the argument · Mic opens automatically on finish'}
+              {voiceStatus.toLowerCase().includes('blocked') && 'Microphone blocked · Tap orb to allow permission'}
+              {voiceStatus.toLowerCase().includes('not supported') && 'Speech recognition not supported in this browser'}
+              {orbState === 'idle' && !voiceStatus.toLowerCase().includes('blocked') && !voiceStatus.toLowerCase().includes('not supported') &&
                 (isEvaluating
                   ? 'Compiling 6-round evaluation report...'
                   : isOpponentTyping
                   ? 'DealDebate is formulating rebuttal...'
-                  : 'Ready · Waiting for input')}
+                  : 'Tap the orb to start mic manually')}
             </p>
 
-            {/* Quick Touch Action when User is speaking */}
-            {orbState === 'user_turn' && liveUserTranscript.trim().length > 0 && (
-              <button
-                onClick={() => handleFinishUserSpeaking()}
-                className="mt-3 inline-flex items-center gap-1.5 px-3 py-1.5 border border-[#111111] text-white text-[11px] uppercase tracking-wider font-sans bg-[#111111] hover:bg-neutral-800 transition-colors shadow-sm"
-              >
-                <Check className="w-3 h-3" />
-                <span>Done Speaking (Submit Turn)</span>
-              </button>
-            )}
+            {/* Action Buttons: Done Speaking & Fallback Tap to Start Mic */}
+            <div className="mt-3 flex items-center justify-center gap-2">
+              {orbState === 'user_turn' && liveUserTranscript.trim().length > 0 && (
+                <button
+                  onClick={() => handleFinishUserSpeaking()}
+                  className="inline-flex items-center gap-1.5 px-3 py-1.5 border border-[#111111] text-white text-[11px] uppercase tracking-wider font-sans bg-[#111111] hover:bg-neutral-800 transition-colors shadow-sm"
+                >
+                  <Check className="w-3 h-3" />
+                  <span>Done Speaking (Submit Turn)</span>
+                </button>
+              )}
+
+              {/* Requirement 3: Manual Orb/Mic Tap Fallback Button */}
+              {orbState !== 'speaking' && !isOpponentTyping && !isEvaluating && (
+                <button
+                  onClick={handleOrbClick}
+                  className="inline-flex items-center gap-1.5 px-3 py-1.5 border border-[#111111]/25 hover:border-[#111111] text-[#111111] text-[11px] uppercase tracking-wider font-sans bg-white hover:bg-neutral-100 transition-colors shadow-xs"
+                  title="Manually trigger microphone listening"
+                >
+                  <Mic className="w-3 h-3" />
+                  <span>{orbState === 'user_turn' ? 'Restart Mic' : 'Tap Orb / Mic'}</span>
+                </button>
+              )}
+            </div>
           </div>
         </div>
       </div>
@@ -518,44 +687,31 @@ export const VoiceScreen: React.FC<VoiceScreenProps> = ({
                     You (Speaking)
                   </span>
                   {liveUserTranscript.trim().length > 0 && (
-                    <button
-                      onClick={() => handleFinishUserSpeaking()}
-                      className="text-[9px] text-[#111111] hover:underline lowercase tracking-normal font-mono"
-                    >
-                      [tap to submit]
-                    </button>
+                    <span className="text-[9px] text-neutral-400 font-mono">
+                      {liveUserTranscript.trim().split(' ').length} words
+                    </span>
                   )}
                 </div>
-                <p className="text-xs sm:text-sm text-[#111111] font-sans leading-relaxed italic">
-                  {liveUserTranscript || 'Listening to your voice... Speak your response.'}
+                <p className="text-xs sm:text-sm text-[#111111] font-sans italic min-h-[1.25rem]">
+                  {liveUserTranscript.trim() ? (
+                    `"${liveUserTranscript}"`
+                  ) : (
+                    <span className="text-neutral-400 not-italic font-mono text-[11px]">
+                      [Listening... speak your counter-argument into your microphone]
+                    </span>
+                  )}
                 </p>
               </div>
-            ) : latestUserMessage && (
-              <div className="border-l-2 border-neutral-400 pl-3 py-0.5 bg-white p-2.5 border-t border-r border-b border-neutral-200">
+            ) : latestUserMessage ? (
+              <div className="border-l-2 border-neutral-400 pl-3 py-0.5 bg-white p-2.5 border-t border-r border-b border-neutral-200 opacity-90">
                 <div className="text-[10px] uppercase font-mono tracking-wider text-neutral-500 font-semibold mb-0.5">
-                  You
+                  You (Round {latestUserMessage.round || currentRound - 1})
                 </div>
-                <p className="text-xs sm:text-sm text-neutral-700 font-sans leading-relaxed">
+                <p className="text-xs sm:text-sm text-[#111111] font-sans leading-relaxed">
                   "{latestUserMessage.content}"
                 </p>
               </div>
-            )}
-
-            {/* Waiting indicator when generating rebuttal */}
-            {isOpponentTyping && (
-              <div className="flex items-center gap-2 text-xs text-neutral-600 italic pt-1">
-                <Loader2 className="w-3.5 h-3.5 animate-spin text-[#111111]" />
-                <span>DealDebate is considering your argument...</span>
-              </div>
-            )}
-
-            {/* Evaluation ongoing notice */}
-            {isEvaluating && (
-              <div className="flex items-center gap-2 text-xs text-[#111111] pt-1 font-medium">
-                <Loader2 className="w-3.5 h-3.5 animate-spin text-[#111111]" />
-                <span>Compiling final 6-round evaluation report...</span>
-              </div>
-            )}
+            ) : null}
 
             <div ref={transcriptBottomRef} />
           </div>

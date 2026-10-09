@@ -16,7 +16,11 @@ import {
   Mic,
   MicOff
 } from 'lucide-react';
-import { isSpeechRecognitionSupported } from '../utils/speechDebate';
+import { 
+  isSpeechRecognitionSupported, 
+  getSpeechRecognitionConstructor, 
+  requestMicPermission 
+} from '../utils/speechDebate';
 
 interface ChatScreenProps {
   scenario: string;
@@ -69,7 +73,7 @@ export const ChatScreen: React.FC<ChatScreenProps> = ({
   }, []);
 
   // Toggle dictation mic in text mode
-  const handleToggleMic = () => {
+  const handleToggleMic = async () => {
     if (isMicListening) {
       if (recognitionRef.current) {
         try {
@@ -86,10 +90,17 @@ export const ChatScreen: React.FC<ChatScreenProps> = ({
       return;
     }
 
+    const perm = await requestMicPermission();
+    if (!perm.granted) {
+      setMicNotice(perm.error === 'Mic blocked' ? 'Mic blocked' : 'Microphone access denied.');
+      setTimeout(() => setMicNotice(null), 3500);
+      return;
+    }
+
     try {
-      const SpeechRecognition =
-        (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
-      const recognition = new SpeechRecognition();
+      const SpeechRecognitionClass = getSpeechRecognitionConstructor();
+      if (!SpeechRecognitionClass) return;
+      const recognition = new SpeechRecognitionClass();
       recognition.continuous = false;
       recognition.interimResults = true;
       recognition.lang = 'en-US';
@@ -116,8 +127,8 @@ export const ChatScreen: React.FC<ChatScreenProps> = ({
 
       recognition.onerror = (event: any) => {
         console.warn('Text mode mic error:', event.error);
-        if (event.error === 'not-allowed') {
-          setMicNotice('Microphone permission was denied.');
+        if (event.error === 'not-allowed' || event.error === 'service-not-allowed') {
+          setMicNotice('Mic blocked');
           setTimeout(() => setMicNotice(null), 3500);
         }
         setIsMicListening(false);
